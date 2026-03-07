@@ -4,15 +4,18 @@ use std::num::NonZeroU32;
 
 use anyhow::{bail, Result};
 use io_imap::{
-    coroutines::{fetch::*, lsub::*, select::*},
+    coroutines::{append::*, fetch::*, lsub::*, select::*},
     types::{
-        core::Vec1,
+        core::{Literal, Vec1},
+        extensions::binary::LiteralOrLiteral8,
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
+        flag::Flag,
         sequence::SequenceSet,
     },
 };
 use io_stream::runtimes::std::handle;
 use log::debug;
+use mail_parser::MessageParser;
 use rfc2047_decoder::{Decoder, RecoverStrategy};
 
 use crate::app::{Envelope, Mailbox};
@@ -216,4 +219,155 @@ fn format_addresses_short(addrs: &[io_imap::types::envelope::Address<'_>]) -> St
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+pub fn fetch_raw_message(config: &ImapConfig, mailbox: &str, uid: u32) -> Result<Vec<u8>> {
+    let (context, mut stream) = connect(config.clone())?;
+
+    let mailbox_owned = mailbox.to_string();
+    let mailbox_name = mailbox_owned.try_into()?;
+
+    let mut arg = None;
+    let mut coroutine = ImapSelect::new(context, mailbox_name);
+
+    let context = loop {
+        match coroutine.resume(arg.take()) {
+            ImapSelectResult::Io { io } => arg = Some(handle(&mut stream, io)?),
+            ImapSelectResult::Ok { context, .. } => break context,
+            ImapSelectResult::Err { err, .. } => bail!(err),
+        }
+    };
+
+    let id = NonZeroU32::new(uid).ok_or_else(|| anyhow::anyhow!("UID must be non-zero"))?;
+
+    let item_names = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+        MessageDataItemName::BodyExt {
+            section: None,
+            partial: None,
+            peek: true,
+        },
+    ]);
+
+    let mut arg = None;
+    let mut coroutine = ImapFetchFirst::new(context, id, item_names, true);
+
+    let items = loop {
+        match coroutine.resume(arg.take()) {
+            ImapFetchFirstResult::Io { io } => arg = Some(handle(&mut stream, io)?),
+            ImapFetchFirstResult::Ok { items, .. } => break items,
+            ImapFetchFirstResult::Err { err, .. } => bail!(err),
+        }
+    };
+
+    let mut raw_message: Option<Vec<u8>> = None;
+    for item in items.into_iter() {
+        if let MessageDataItem::BodyExt { data, .. } = item {
+            if let Some(data) = data.0 {
+                raw_message = Some(data.as_ref().to_vec());
+            }
+        }
+    }
+
+    raw_message.ok_or_else(|| anyhow::anyhow!("No message data returned"))
+}
+
+pub fn fetch_message(config: &ImapConfig, mailbox: &str, uid: u32) -> Result<String> {
+    let (context, mut stream) = connect(config.clone())?;
+
+    let mailbox_owned = mailbox.to_string();
+    let mailbox_name = mailbox_owned.try_into()?;
+
+    // SELECT mailbox
+    let mut arg = None;
+    let mut coroutine = ImapSelect::new(context, mailbox_name);
+
+    let context = loop {
+        match coroutine.resume(arg.take()) {
+            ImapSelectResult::Io { io } => arg = Some(handle(&mut stream, io)?),
+            ImapSelectResult::Ok { context, .. } => break context,
+            ImapSelectResult::Err { err, .. } => bail!(err),
+        }
+    };
+
+    // FETCH with BODY.PEEK[] to avoid marking as read
+    let id = NonZeroU32::new(uid).ok_or_else(|| anyhow::anyhow!("UID must be non-zero"))?;
+
+    let item_names = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+        MessageDataItemName::BodyExt {
+            section: None,
+            partial: None,
+            peek: true,
+        },
+    ]);
+
+    let mut arg = None;
+    let mut coroutine = ImapFetchFirst::new(context, id, item_names, true);
+
+    let items = loop {
+        match coroutine.resume(arg.take()) {
+            ImapFetchFirstResult::Io { io } => arg = Some(handle(&mut stream, io)?),
+            ImapFetchFirstResult::Ok { items, .. } => break items,
+            ImapFetchFirstResult::Err { err, .. } => bail!(err),
+        }
+    };
+
+    // Extract raw message bytes
+    let mut raw_message: Option<Vec<u8>> = None;
+    for item in items.into_iter() {
+        if let MessageDataItem::BodyExt { data, .. } = item {
+            if let Some(data) = data.0 {
+                raw_message = Some(data.as_ref().to_vec());
+            }
+        }
+    }
+
+    let raw = raw_message.ok_or_else(|| anyhow::anyhow!("No message data returned"))?;
+
+    // Parse message using mail-parser and get text content
+    let message = MessageParser::default()
+        .parse(&raw)
+        .ok_or_else(|| anyhow::anyhow!("Failed to parse message"))?;
+
+    // Get plain text, or convert HTML to text
+    let content = if let Some(text) = message.body_text(0) {
+        text.to_string()
+    } else if let Some(html) = message.body_html(0) {
+        html2text::from_read(html.as_bytes(), 80)
+    } else {
+        // Fallback to raw message as string
+        String::from_utf8_lossy(&raw).to_string()
+    };
+
+    Ok(content)
+}
+
+pub fn save_to_drafts(config: &ImapConfig, content: &str) -> Result<()> {
+    let (context, mut stream) = connect(config.clone())?;
+
+    // Build a minimal RFC 5322 message
+    let message_content = format!(
+        "From: \r\nTo: \r\nSubject: Draft\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+        content
+    );
+
+    let mailbox: io_imap::types::mailbox::Mailbox<'static> = "Drafts".try_into()?;
+    let literal = Literal::try_from(message_content.into_bytes())?;
+    let message = LiteralOrLiteral8::Literal(literal);
+
+    // Add Draft flag
+    let flags = vec![Flag::Draft];
+
+    // APPEND
+    let mut arg = None;
+    let mut coroutine = ImapAppend::new(context, mailbox, flags, None, message);
+
+    loop {
+        match coroutine.resume(arg.take()) {
+            ImapAppendResult::Io { io } => arg = Some(handle(&mut stream, io)?),
+            ImapAppendResult::Ok { .. } => break,
+            ImapAppendResult::Err { err, .. } => bail!(err),
+        }
+    }
+
+    Ok(())
 }
