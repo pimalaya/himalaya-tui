@@ -17,30 +17,31 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["imap", "smtp", "jmap", "rustls-ring"]
-imap = ["dep:io-imap", "pimalaya-toolbox/imap"]
-smtp = ["dep:io-smtp", "pimalaya-toolbox/smtp"]
-jmap = ["dep:io-jmap", "pimalaya-toolbox/jmap"]
-rustls-aws = ["pimalaya-toolbox/rustls-aws"]
-rustls-ring = ["pimalaya-toolbox/rustls-ring"]
-native-tls = ["pimalaya-toolbox/native-tls"]
+imap = ["dep:io-imap", "io-imap/client"]
+smtp = ["dep:io-smtp", "io-smtp/client"]
+jmap = ["dep:io-jmap", "dep:base64", "io-jmap/client"]
+native-tls = ["pimalaya-stream/native-tls", "io-imap?/native-tls", "io-jmap?/native-tls", "io-smtp?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-imap?/rustls-aws", "io-jmap?/rustls-aws", "io-smtp?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-imap?/rustls-ring", "io-jmap?/rustls-ring", "io-smtp?/rustls-ring"]
+vendored = ["pimalaya-stream/vendored"]
 
 [build-dependencies]
-pimalaya-toolbox = { version = "0.0.4", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.0.1", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
+base64 = { version = "0.22", optional = true }
 chrono = { version = "0.4", default-features = false }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.12"
 io-imap = { version = "0.0.1", default-features = false, optional = true }
 io-jmap = { version = "0.0.1", default-features = false, optional = true }
-io-process = { version = "0.0.2", default-features = false }
 io-smtp = { version = "0.0.1", default-features = false, optional = true }
-io-stream = { version = "0.0.2", default-features = false, features = ["std"] }
 log = "0.4"
 mail-parser = "0.9"
 mml = "1"
-pimalaya-toolbox = { version = "0.0.4", default-features = false, features = ["config", "terminal", "secret", "sasl", "stream"] }
+pimalaya-config = { version = "0.0.1", default-features = false, features = ["toml", "secret"] }
+pimalaya-stream = { version = "0.0.1", default-features = false, features = ["std"] }
 ratatui = "0.30"
 rfc2047-decoder = "1"
 secrecy = "0.10"
@@ -56,8 +57,10 @@ uds_windows = "1"
 
 [patch.crates-io]
 io-http.git = "https://github.com/pimalaya/io-http"
-io-imap = { git = "https://github.com/pimalaya/io-imap", branch = "io" }
+io-imap.git = "https://github.com/pimalaya/io-imap"
 io-jmap.git = "https://github.com/pimalaya/io-jmap"
 io-smtp.git = "https://github.com/pimalaya/io-smtp"
 mml.git = "https://github.com/pimalaya/mml"
-pimalaya-toolbox.git = "https://github.com/pimalaya/toolbox"
+pimalaya-cli.git = "https://github.com/pimalaya/cli"
+pimalaya-config.git = "https://github.com/pimalaya/config"
+pimalaya-stream.git = "https://github.com/pimalaya/stream"

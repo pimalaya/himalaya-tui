@@ -1,16 +1,13 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use crate::config::SmtpConfig;
 use anyhow::{bail, Result};
-use io_smtp::{
-    rfc5321::types::{
-        domain::Domain, ehlo_domain::EhloDomain, forward_path::ForwardPath, local_part::LocalPart,
-        mailbox::Mailbox, reverse_path::ReversePath,
-    },
-    send_message::{SendSmtpMessage, SendSmtpMessageResult},
+use io_smtp::rfc5321::types::{
+    domain::Domain, ehlo_domain::EhloDomain, forward_path::ForwardPath, local_part::LocalPart,
+    mailbox::Mailbox, reverse_path::ReversePath,
 };
-use io_stream::runtimes::std::handle;
 use mail_parser::{Addr, Address, HeaderName, HeaderValue, MessageParser};
+
+use crate::config::SmtpConfig;
 
 pub struct SmtpMessageSendHandler {
     pub raw: Vec<u8>,
@@ -18,19 +15,10 @@ pub struct SmtpMessageSendHandler {
 
 impl SmtpMessageSendHandler {
     pub fn execute(self, config: &SmtpConfig) -> Result<()> {
-        let mut session = config.clone().into_session()?;
+        let mut client = config.clone().into_client()?;
         let (reverse_path, forward_paths) = into_smtp_msg(&self.raw)?;
 
-        let mut arg = None;
-        let mut coroutine = SendSmtpMessage::new(reverse_path, forward_paths, self.raw);
-
-        loop {
-            match coroutine.resume(arg.take()) {
-                SendSmtpMessageResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                SendSmtpMessageResult::Ok => break,
-                SendSmtpMessageResult::Err { err } => bail!(err),
-            }
-        }
+        client.send(reverse_path, forward_paths, self.raw)?;
 
         Ok(())
     }

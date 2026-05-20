@@ -1,10 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use io_imap::{
-    coroutines::append::{ImapAppend, ImapAppendResult},
-    types::{core::Literal, extensions::binary::LiteralOrLiteral8, flag::Flag},
+    client::ImapClientStd,
+    types::{core::Literal, extensions::binary::LiteralOrLiteral8, flag::Flag, mailbox::Mailbox},
 };
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::imap::ImapSession;
+use pimalaya_stream::std::stream::StreamStd;
 
 pub struct ImapMessageSaveHandler {
     pub mailbox: String,
@@ -13,28 +12,12 @@ pub struct ImapMessageSaveHandler {
 }
 
 impl ImapMessageSaveHandler {
-    pub fn execute(self, session: &mut ImapSession) -> Result<()> {
-        let mailbox: io_imap::types::mailbox::Mailbox<'static> = self.mailbox.try_into()?;
+    pub fn execute(self, client: &mut ImapClientStd<StreamStd>) -> Result<()> {
+        let mailbox: Mailbox<'static> = self.mailbox.try_into()?;
         let literal = Literal::try_from(self.raw)?;
         let message = LiteralOrLiteral8::Literal(literal);
 
-        let context = std::mem::take(&mut session.context);
-        let mut arg = None;
-        let mut coroutine = ImapAppend::new(context, mailbox, self.flags, None, message);
-
-        loop {
-            match coroutine.resume(arg.take()) {
-                ImapAppendResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                ImapAppendResult::Ok { context, .. } => {
-                    session.context = context;
-                    break;
-                }
-                ImapAppendResult::Err { context, err } => {
-                    session.context = context;
-                    bail!(err);
-                }
-            }
-        }
+        client.append(mailbox, self.flags, None, message)?;
 
         Ok(())
     }

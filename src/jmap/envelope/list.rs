@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 
-use anyhow::{bail, Result};
-use io_jmap::rfc8621::{
-    coroutines::email_query::{JmapEmailQuery, JmapEmailQueryResult},
-    types::email::{EmailComparator, EmailFilter, EmailProperty},
+use anyhow::Result;
+use io_jmap::{
+    client::JmapClientStd,
+    rfc8621::email::{EmailComparator, EmailFilter, EmailProperty},
 };
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::jmap::JmapSession;
 
 use crate::app::Envelope;
 
@@ -17,7 +15,7 @@ pub struct JmapEnvelopeListHandler {
 }
 
 impl JmapEnvelopeListHandler {
-    pub fn execute(self, session: &mut JmapSession) -> Result<(Vec<Envelope>, u32)> {
+    pub fn execute(self, client: &mut JmapClientStd) -> Result<(Vec<Envelope>, u32)> {
         let filter = Some(EmailFilter {
             in_mailbox: Some(self.mailbox_id),
             ..Default::default()
@@ -33,26 +31,10 @@ impl JmapEnvelopeListHandler {
             EmailProperty::Keywords,
         ]);
 
-        let mut coroutine = JmapEmailQuery::new(
-            &session.session,
-            &session.http_auth,
-            filter,
-            sort,
-            position,
-            limit,
-            properties,
-        )?;
-        let mut arg = None;
+        let output = client.email_query(filter, sort, position, limit, properties)?;
 
-        let (emails, total) = loop {
-            match coroutine.resume(arg.take()) {
-                JmapEmailQueryResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                JmapEmailQueryResult::Ok { emails, total, .. } => break (emails, total),
-                JmapEmailQueryResult::Err { err } => bail!(err),
-            }
-        };
-
-        let envelopes = emails
+        let envelopes = output
+            .emails
             .into_iter()
             .map(|email| {
                 let id = email.id.clone().unwrap_or_default();
@@ -98,6 +80,6 @@ impl JmapEnvelopeListHandler {
             })
             .collect();
 
-        Ok((envelopes, total.unwrap_or(0) as u32))
+        Ok((envelopes, output.total.unwrap_or(0) as u32))
     }
 }

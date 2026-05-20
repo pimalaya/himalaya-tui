@@ -1,9 +1,7 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use anyhow::{bail, Result};
-use io_jmap::rfc8621::coroutines::email_set::{JmapEmailSet, JmapEmailSetArgs, JmapEmailSetResult};
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::jmap::JmapSession;
+use anyhow::Result;
+use io_jmap::{client::JmapClientStd, rfc8621::email_set::JmapEmailSetArgs};
 
 pub struct JmapMessageMoveHandler {
     pub id: String,
@@ -11,21 +9,12 @@ pub struct JmapMessageMoveHandler {
 }
 
 impl JmapMessageMoveHandler {
-    pub fn execute(self, session: &mut JmapSession) -> Result<()> {
+    pub fn execute(self, client: &mut JmapClientStd) -> Result<()> {
         let mut args = JmapEmailSetArgs::default();
-        let new_mailbox_ids = HashMap::from([(self.target_mailbox_id, true)]);
+        let new_mailbox_ids = BTreeMap::from([(self.target_mailbox_id, true)]);
         args.replace_mailbox_ids(self.id, new_mailbox_ids);
 
-        let mut coroutine = JmapEmailSet::new(&session.session, &session.http_auth, args)?;
-        let mut arg = None;
-
-        loop {
-            match coroutine.resume(arg.take()) {
-                JmapEmailSetResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                JmapEmailSetResult::Ok { .. } => break,
-                JmapEmailSetResult::Err { err } => bail!(err),
-            }
-        }
+        client.email_set(args)?;
 
         Ok(())
     }

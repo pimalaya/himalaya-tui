@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
+use io_imap::client::ImapClientStd;
 use mail_parser::MessageParser;
-use pimalaya_toolbox::stream::imap::ImapSession;
+use pimalaya_stream::std::stream::StreamStd;
 
 use crate::imap::message::get_raw::ImapMessageGetRawHandler;
 
@@ -10,12 +11,12 @@ pub struct ImapMessageGetHandler {
 }
 
 impl ImapMessageGetHandler {
-    pub fn execute(self, session: &mut ImapSession) -> Result<String> {
+    pub fn execute(self, client: &mut ImapClientStd<StreamStd>) -> Result<String> {
         let raw = ImapMessageGetRawHandler {
             mailbox: self.mailbox,
             id: self.id,
         }
-        .execute(session)?;
+        .execute(client)?;
 
         let message = MessageParser::default()
             .parse(&raw)

@@ -1,17 +1,11 @@
-use std::num::NonZeroU32;
-
 use anyhow::{anyhow, bail, Result};
 use io_imap::{
-    coroutines::{
-        fetch::{ImapFetchFirst, ImapFetchFirstResult},
-        select::{ImapSelect, ImapSelectResult},
-    },
+    client::ImapClientStd,
     types::fetch::{MacroOrMessageDataItemNames, MessageDataItem},
 };
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::imap::ImapSession;
+use pimalaya_stream::std::stream::StreamStd;
 
-use crate::imap::fetch_item_names_body_peek;
+use crate::imap::util::fetch_item_names_body_peek;
 
 pub struct ImapMessageGetRawHandler {
     pub mailbox: String,
@@ -19,45 +13,24 @@ pub struct ImapMessageGetRawHandler {
 }
 
 impl ImapMessageGetRawHandler {
-    pub fn execute(self, session: &mut ImapSession) -> Result<Vec<u8>> {
+    pub fn execute(self, client: &mut ImapClientStd<StreamStd>) -> Result<Vec<u8>> {
         let mailbox_name = self.mailbox.try_into()?;
         let uid: u32 = self.id.parse()?;
-        let id = NonZeroU32::new(uid).ok_or_else(|| anyhow!("UID must be non-zero"))?;
+        if uid == 0 {
+            bail!("UID must be non-zero");
+        }
 
-        let context = std::mem::take(&mut session.context);
-        let mut arg = None;
-        let mut coroutine = ImapSelect::new(context, mailbox_name);
-
-        let context = loop {
-            match coroutine.resume(arg.take()) {
-                ImapSelectResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                ImapSelectResult::Ok { context, .. } => break context,
-                ImapSelectResult::Err { context, err } => {
-                    session.context = context;
-                    bail!(err);
-                }
-            }
-        };
+        client.select(mailbox_name)?;
 
         let item_names =
             MacroOrMessageDataItemNames::MessageDataItemNames(fetch_item_names_body_peek());
 
-        let mut arg = None;
-        let mut coroutine = ImapFetchFirst::new(context, id, item_names, true);
+        let sequence_set = uid.to_string().parse()?;
+        let mut data = client.fetch(sequence_set, item_names, true)?;
 
-        let items = loop {
-            match coroutine.resume(arg.take()) {
-                ImapFetchFirstResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                ImapFetchFirstResult::Ok { context, items } => {
-                    session.context = context;
-                    break items;
-                }
-                ImapFetchFirstResult::Err { context, err } => {
-                    session.context = context;
-                    bail!(err);
-                }
-            }
-        };
+        let (_, items) = data
+            .pop_first()
+            .ok_or_else(|| anyhow!("No message data returned"))?;
 
         for item in items {
             if let MessageDataItem::BodyExt { data, .. } = item {

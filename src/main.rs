@@ -1,39 +1,51 @@
 use std::{fs::File, io, path::PathBuf, time::Duration};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use edtui::{
     actions::{system_editor, Execute, OpenSystemEditor},
     EditorEventHandler,
 };
+#[cfg(feature = "imap")]
+use himalaya_tui::app::FlagAction;
+use himalaya_tui::app::{App, ComposeAction, Dialog, EnvelopeAction, Panel};
+use himalaya_tui::config::{AccountConfig, Config, SmtpConfig};
+#[cfg(feature = "imap")]
+use himalaya_tui::imap::{
+    envelope::list::ImapEnvelopeListHandler,
+    flag::{add::ImapFlagAddHandler, remove::ImapFlagRemoveHandler},
+    mailbox::list::ImapMailboxListHandler,
+    message::{
+        copy::ImapMessageCopyHandler, delete::ImapMessageDeleteHandler, get::ImapMessageGetHandler,
+        get_raw::ImapMessageGetRawHandler, r#move::ImapMessageMoveHandler,
+        save::ImapMessageSaveHandler,
+    },
+};
 #[cfg(feature = "jmap")]
-use himalaya_tui::jmap::*;
+use himalaya_tui::jmap::{
+    envelope::list::JmapEnvelopeListHandler,
+    flag::update::JmapFlagUpdateHandler,
+    mailbox::list::JmapMailboxListHandler,
+    message::{
+        copy::JmapMessageCopyHandler, delete::JmapMessageDeleteHandler, get::JmapMessageGetHandler,
+        get_raw::JmapMessageGetRawHandler, r#move::JmapMessageMoveHandler,
+        save::JmapMessageSaveHandler, send::JmapMessageSendHandler,
+    },
+};
 #[cfg(feature = "smtp")]
-use himalaya_tui::smtp::SmtpMessageSendHandler;
+use himalaya_tui::smtp::message::send::SmtpMessageSendHandler;
+use himalaya_tui::ui;
 #[cfg(feature = "imap")]
-use himalaya_tui::{app::FlagAction, imap::*};
-use himalaya_tui::{
-    app::{App, ComposeAction, Dialog, EnvelopeAction, Panel},
-    config::{AccountConfig, Config, SmtpConfig},
-    ui,
-};
-#[cfg(feature = "imap")]
-use io_imap::{
-    coroutines::noop::{ImapNoop, ImapNoopResult},
-    types::flag::Flag,
-};
+use io_imap::{client::ImapClientStd, types::flag::Flag};
 #[cfg(feature = "jmap")]
-use io_jmap::rfc8620::coroutines::session_get::{JmapSessionGet, JmapSessionGetResult};
-use io_stream::runtimes::std::handle;
-use mml::message::compiler::MmlCompilerBuilder;
-use pimalaya_toolbox::config::TomlConfig;
-#[cfg(feature = "jmap")]
-use pimalaya_toolbox::stream::jmap::{JmapAuth, JmapSession};
-use pimalaya_toolbox::stream::Tls;
+use io_jmap::client::JmapClientStd;
+use mml::compiler::message::MmlCompilerBuilder;
+use pimalaya_config::toml::TomlConfig;
 #[cfg(feature = "imap")]
-use pimalaya_toolbox::{
-    sasl::{sasl_default_mechanisms, Sasl, SaslLogin, SaslPlain},
-    stream::imap::ImapSession,
-};
+use pimalaya_stream::sasl::{Sasl, SaslPlain};
+#[cfg(feature = "jmap")]
+use pimalaya_stream::tls::Tls as JmapTls;
+#[cfg(feature = "imap")]
+use pimalaya_stream::{std::stream::StreamStd, tls::Tls};
 use ratatui::{
     backend::CrosstermBackend,
     crossterm::{
@@ -51,9 +63,9 @@ use url::Url;
 
 enum Backend {
     #[cfg(feature = "imap")]
-    Imap(ImapSession),
+    Imap(ImapClientStd<StreamStd>),
     #[cfg(feature = "jmap")]
-    Jmap(JmapSession),
+    Jmap(JmapClientStd),
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -142,8 +154,11 @@ fn run(
 type StartupTuple = (String, String, String, String, Option<SmtpConfig>, Backend);
 
 fn try_from_config(config_paths: &[PathBuf], account_name: Option<&str>) -> Result<StartupTuple> {
-    let config = Config::from_paths_or_default(config_paths)?;
-    let (name, account_config) = config.get_account(account_name)?;
+    let mut config =
+        Config::from_paths_or_default(config_paths)?.ok_or_else(|| anyhow!("No config found"))?;
+    let (name, account_config) = config
+        .take_account(account_name)?
+        .ok_or_else(|| anyhow!("Account not found"))?;
     let email = account_config.email.clone();
     let display_name = account_config
         .display_name
@@ -160,15 +175,16 @@ fn try_from_config(config_paths: &[PathBuf], account_name: Option<&str>) -> Resu
     Ok((name, email, display_name, signature, smtp_config, backend))
 }
 
+#[allow(unused_variables)]
 fn build_backend(name: &str, account_config: AccountConfig) -> Result<Backend> {
     #[cfg(feature = "jmap")]
     if let Some(jmap_cfg) = account_config.jmap {
-        return Ok(Backend::Jmap(jmap_cfg.into_session()?));
+        return Ok(Backend::Jmap(jmap_cfg.into_client()?));
     }
 
     #[cfg(feature = "imap")]
     if let Some(imap_cfg) = account_config.imap {
-        return Ok(Backend::Imap(imap_cfg.into_session()?));
+        return Ok(Backend::Imap(imap_cfg.into_client()?));
     }
 
     anyhow::bail!("No supported backend configured for account `{name}`")
@@ -221,6 +237,7 @@ fn run_wizard_tui(
     }
 }
 
+#[allow(unused_variables)]
 fn try_connect(
     uri_str: &str,
     username_arg: &str,
@@ -250,25 +267,35 @@ fn try_connect(
     let backend = match scheme.as_str() {
         #[cfg(feature = "imap")]
         "imap" | "imaps" => {
-            let sasl = Sasl {
-                mechanisms: sasl_default_mechanisms(),
-                plain: Some(SaslPlain {
-                    authzid: None,
-                    authcid: username.clone(),
-                    passwd: password.clone(),
-                }),
-                login: Some(SaslLogin {
-                    username: username.clone(),
-                    password: password.clone(),
-                }),
-                anonymous: None,
-            };
-            Backend::Imap(ImapSession::new(url, Tls::default(), false, sasl)?)
+            let mut tls = Tls::default();
+            tls.rustls.alpn = vec!["imap".into()];
+            let sasl = Sasl::Plain(SaslPlain {
+                authzid: None,
+                authcid: username.clone(),
+                passwd: password.clone(),
+            });
+            Backend::Imap(ImapClientStd::<StreamStd>::connect(
+                &url,
+                &tls,
+                false,
+                Some(sasl),
+            )?)
         }
         #[cfg(feature = "jmap")]
         "jmap" | "jmaps" | "http" | "https" => {
-            let auth = JmapAuth::Basic { username, password };
-            Backend::Jmap(JmapSession::new(url.to_string(), Tls::default(), auth)?)
+            use base64::{prelude::BASE64_STANDARD, Engine};
+            use secrecy::ExposeSecret;
+
+            let mut tls = JmapTls::default();
+            tls.rustls.alpn = vec!["http/1.1".into()];
+
+            let creds = format!("{}:{}", username, password.expose_secret());
+            let encoded = BASE64_STANDARD.encode(creds.into_bytes());
+            let http_auth: SecretString = format!("Basic {encoded}").into();
+
+            let mut client = JmapClientStd::connect(&url, &tls, http_auth)?;
+            client.session_get(&url)?;
+            Backend::Jmap(client)
         }
         _ => anyhow::bail!(
             "Unsupported URI scheme `{scheme}`. Use imap://, imaps://, https://, or http://"
@@ -283,16 +310,16 @@ fn try_connect(
 fn load_mailboxes(backend: &mut Backend) -> Result<Vec<himalaya_tui::app::Mailbox>> {
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => ImapMailboxListHandler.execute(session),
+        Backend::Imap(client) => ImapMailboxListHandler.execute(client),
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => JmapMailboxListHandler.execute(session),
+        Backend::Jmap(client) => JmapMailboxListHandler.execute(client),
     }
 }
 
 fn load_envelopes(app: &mut App, backend: &mut Backend) {
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
+        Backend::Imap(client) => {
             let Some(mailbox) = app.selected_mailbox.clone() else {
                 return;
             };
@@ -301,14 +328,14 @@ fn load_envelopes(app: &mut App, backend: &mut Backend) {
                 page: app.envelope_page,
                 page_size: app.envelope_page_size,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok((envelopes, total)) => app.set_envelopes(envelopes, total),
                 Err(e) => app.set_status(format!("Error: {e}")),
             }
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
+        Backend::Jmap(client) => {
             let Some(mailbox_id) = app.selected_mailbox_id.clone() else {
                 app.set_status("No mailbox ID available");
                 return;
@@ -318,7 +345,7 @@ fn load_envelopes(app: &mut App, backend: &mut Backend) {
                 page: app.envelope_page,
                 page_size: app.envelope_page_size,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok((envelopes, total)) => app.set_envelopes(envelopes, total),
                 Err(e) => app.set_status(format!("Error: {e}")),
@@ -332,51 +359,13 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 fn send_keepalive(backend: &mut Backend) {
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
-            let context = std::mem::take(&mut session.context);
-            let mut coroutine = ImapNoop::new(context);
-            let mut arg = None;
-            loop {
-                match coroutine.resume(arg.take()) {
-                    ImapNoopResult::Io { io } => match handle(&mut session.stream, io) {
-                        Ok(io) => arg = Some(io),
-                        Err(_) => break,
-                    },
-                    ImapNoopResult::Ok { context } => {
-                        session.context = context;
-                        break;
-                    }
-                    ImapNoopResult::Err { context, .. } => {
-                        session.context = context;
-                        break;
-                    }
-                }
-            }
+        Backend::Imap(client) => {
+            let _ = client.noop();
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
-            let Ok(url) = session.session.api_url.as_str().parse() else {
-                return;
-            };
-            let Ok(mut coroutine) = JmapSessionGet::new(&session.http_auth, &url) else {
-                return;
-            };
-            let mut arg = None;
-            loop {
-                match coroutine.resume(arg.take()) {
-                    JmapSessionGetResult::Io { io } => match handle(&mut session.stream, io) {
-                        Ok(io) => arg = Some(io),
-                        Err(_) => break,
-                    },
-                    JmapSessionGetResult::Ok {
-                        session: new_session,
-                        ..
-                    } => {
-                        session.session = new_session;
-                        break;
-                    }
-                    JmapSessionGetResult::Reset(_) | JmapSessionGetResult::Err { .. } => break,
-                }
+        Backend::Jmap(client) => {
+            if let Some(api_url) = client.session().map(|s| s.api_url.clone()) {
+                let _ = client.session_get(&api_url);
             }
         }
     }
@@ -527,7 +516,7 @@ fn handle_read_message(app: &mut App, backend: &mut Backend) {
 
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
+        Backend::Imap(client) => {
             let Some(mailbox) = app.selected_mailbox.clone() else {
                 return;
             };
@@ -535,15 +524,15 @@ fn handle_read_message(app: &mut App, backend: &mut Backend) {
                 mailbox,
                 id: envelope.id,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok(content) => app.show_message(content),
                 Err(e) => app.set_status(format!("Error: {e}")),
             }
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
-            match (JmapMessageGetHandler { id: envelope.id }).execute(session) {
+        Backend::Jmap(client) => {
+            match (JmapMessageGetHandler { id: envelope.id }).execute(client) {
                 Ok(content) => app.show_message(content),
                 Err(e) => app.set_status(format!("Error: {e}")),
             }
@@ -559,7 +548,7 @@ fn handle_reply(app: &mut App, backend: &mut Backend, reply_all: bool) {
 
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
+        Backend::Imap(client) => {
             let Some(mailbox) = app.selected_mailbox.clone() else {
                 return;
             };
@@ -567,7 +556,7 @@ fn handle_reply(app: &mut App, backend: &mut Backend, reply_all: bool) {
                 mailbox,
                 id: envelope.id,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok(raw) => {
                     app.start_reply(&raw, reply_all);
@@ -576,8 +565,8 @@ fn handle_reply(app: &mut App, backend: &mut Backend, reply_all: bool) {
             }
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
-            match (JmapMessageGetRawHandler { id: envelope.id }).execute(session) {
+        Backend::Jmap(client) => {
+            match (JmapMessageGetRawHandler { id: envelope.id }).execute(client) {
                 Ok(raw) => {
                     app.start_reply(&raw, reply_all);
                 }
@@ -595,7 +584,7 @@ fn handle_forward(app: &mut App, backend: &mut Backend) {
 
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
+        Backend::Imap(client) => {
             let Some(mailbox) = app.selected_mailbox.clone() else {
                 return;
             };
@@ -603,7 +592,7 @@ fn handle_forward(app: &mut App, backend: &mut Backend) {
                 mailbox,
                 id: envelope.id,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok(raw) => {
                     app.start_forward(&raw);
@@ -612,8 +601,8 @@ fn handle_forward(app: &mut App, backend: &mut Backend) {
             }
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
-            match (JmapMessageGetRawHandler { id: envelope.id }).execute(session) {
+        Backend::Jmap(client) => {
+            match (JmapMessageGetRawHandler { id: envelope.id }).execute(client) {
                 Ok(raw) => {
                     app.start_forward(&raw);
                 }
@@ -642,7 +631,7 @@ fn handle_delete_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
 
             match backend {
                 #[cfg(feature = "imap")]
-                Backend::Imap(session) => {
+                Backend::Imap(client) => {
                     let Some(mailbox) = app.selected_mailbox.clone() else {
                         return;
                     };
@@ -650,7 +639,7 @@ fn handle_delete_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                         mailbox,
                         id: envelope.id,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) => {
                             app.flag_selected_envelope("\\Deleted");
@@ -660,8 +649,8 @@ fn handle_delete_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                     }
                 }
                 #[cfg(feature = "jmap")]
-                Backend::Jmap(session) => {
-                    match (JmapMessageDeleteHandler { id: envelope.id }).execute(session) {
+                Backend::Jmap(client) => {
+                    match (JmapMessageDeleteHandler { id: envelope.id }).execute(client) {
                         Ok(_) => {
                             app.remove_selected_envelope();
                             app.set_status("Message deleted");
@@ -693,7 +682,7 @@ fn handle_copy_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
 
             match backend {
                 #[cfg(feature = "imap")]
-                Backend::Imap(session) => {
+                Backend::Imap(client) => {
                     let Some(mailbox) = app.selected_mailbox.clone() else {
                         return;
                     };
@@ -704,14 +693,14 @@ fn handle_copy_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                         id: envelope.id,
                         target,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) => app.set_status("Copied"),
                         Err(e) => app.set_status(format!("Error: {e}")),
                     }
                 }
                 #[cfg(feature = "jmap")]
-                Backend::Jmap(session) => {
+                Backend::Jmap(client) => {
                     let Some(target_mailbox_id) = target_mailbox.id else {
                         app.set_status("Target mailbox has no ID");
                         return;
@@ -721,7 +710,7 @@ fn handle_copy_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                         id: envelope.id,
                         target_mailbox_id,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) => app.set_status("Copied"),
                         Err(e) => app.set_status(format!("Error: {e}")),
@@ -751,7 +740,7 @@ fn handle_move_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
 
             match backend {
                 #[cfg(feature = "imap")]
-                Backend::Imap(session) => {
+                Backend::Imap(client) => {
                     let Some(mailbox) = app.selected_mailbox.clone() else {
                         return;
                     };
@@ -762,7 +751,7 @@ fn handle_move_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                         id: envelope.id,
                         target,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) => {
                             app.remove_selected_envelope();
@@ -772,7 +761,7 @@ fn handle_move_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                     }
                 }
                 #[cfg(feature = "jmap")]
-                Backend::Jmap(session) => {
+                Backend::Jmap(client) => {
                     let Some(target_mailbox_id) = target_mailbox.id else {
                         app.set_status("Target mailbox has no ID");
                         return;
@@ -782,7 +771,7 @@ fn handle_move_to_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
                         id: envelope.id,
                         target_mailbox_id,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) => {
                             app.remove_selected_envelope();
@@ -813,7 +802,7 @@ fn handle_flag_dialog(app: &mut App, key: KeyCode, backend: &mut Backend, add: b
 
             match backend {
                 #[cfg(feature = "imap")]
-                Backend::Imap(session) => {
+                Backend::Imap(client) => {
                     let Some(mailbox) = app.selected_mailbox.clone() else {
                         return;
                     };
@@ -830,14 +819,14 @@ fn handle_flag_dialog(app: &mut App, key: KeyCode, backend: &mut Backend, add: b
                             id: envelope.id,
                             flags: vec![flag],
                         }
-                        .execute(session)
+                        .execute(client)
                     } else {
                         ImapFlagRemoveHandler {
                             mailbox,
                             id: envelope.id,
                             flags: vec![flag],
                         }
-                        .execute(session)
+                        .execute(client)
                     };
                     match result {
                         Ok(_) if add => {
@@ -852,7 +841,7 @@ fn handle_flag_dialog(app: &mut App, key: KeyCode, backend: &mut Backend, add: b
                     }
                 }
                 #[cfg(feature = "jmap")]
-                Backend::Jmap(session) => {
+                Backend::Jmap(client) => {
                     let keyword = flag_action.jmap_keyword().to_string();
                     app.set_status(format!("{verb} flag {keyword}..."));
                     let (add_kw, remove_kw) = if add {
@@ -865,7 +854,7 @@ fn handle_flag_dialog(app: &mut App, key: KeyCode, backend: &mut Backend, add: b
                         add: add_kw,
                         remove: remove_kw,
                     })
-                    .execute(session)
+                    .execute(client)
                     {
                         Ok(_) if add => {
                             app.flag_selected_envelope(&keyword);
@@ -931,6 +920,7 @@ fn handle_compose_dialog(app: &mut App, key: KeyCode, backend: &mut Backend) {
     }
 }
 
+#[allow(unused_variables)]
 fn save_to_drafts(app: &mut App, backend: &mut Backend) {
     let content = app.get_compose_content();
     let raw = format!(
@@ -942,13 +932,13 @@ fn save_to_drafts(app: &mut App, backend: &mut Backend) {
 
     match backend {
         #[cfg(feature = "imap")]
-        Backend::Imap(session) => {
+        Backend::Imap(client) => {
             match (ImapMessageSaveHandler {
                 mailbox: "Drafts".to_string(),
                 raw,
                 flags: vec![Flag::Draft],
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok(_) => {
                     app.set_status("Saved to Drafts");
@@ -958,7 +948,7 @@ fn save_to_drafts(app: &mut App, backend: &mut Backend) {
             }
         }
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
+        Backend::Jmap(client) => {
             let Some(mailbox_id) = app
                 .mailboxes
                 .iter()
@@ -968,7 +958,7 @@ fn save_to_drafts(app: &mut App, backend: &mut Backend) {
                 app.set_status("No Drafts mailbox found");
                 return;
             };
-            match (JmapMessageSaveHandler { mailbox_id, raw }).execute(session) {
+            match (JmapMessageSaveHandler { mailbox_id, raw }).execute(client) {
                 Ok(_) => {
                     app.set_status("Saved to Drafts");
                     app.cancel_compose();
@@ -979,12 +969,13 @@ fn save_to_drafts(app: &mut App, backend: &mut Backend) {
     }
 }
 
+#[allow(unused_variables)]
 fn send_compiled(app: &mut App, mime_bytes: Vec<u8>, backend: &mut Backend) {
     app.set_status("Sending message...");
 
     match backend {
         #[cfg(feature = "jmap")]
-        Backend::Jmap(session) => {
+        Backend::Jmap(client) => {
             let sent_mailbox_id = app
                 .mailboxes
                 .iter()
@@ -995,7 +986,7 @@ fn send_compiled(app: &mut App, mime_bytes: Vec<u8>, backend: &mut Backend) {
                 sent_mailbox_id,
                 envelope: None,
             })
-            .execute(session)
+            .execute(client)
             {
                 Ok(()) => {
                     app.set_status("Message sent");

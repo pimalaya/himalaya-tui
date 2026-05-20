@@ -1,41 +1,24 @@
-use anyhow::{bail, Result};
-use io_imap::coroutines::lsub::{ImapLsub, ImapLsubResult};
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::imap::ImapSession;
+use anyhow::Result;
+use io_imap::{client::ImapClientStd, types::mailbox::Mailbox as ImapMailbox};
+use pimalaya_stream::std::stream::StreamStd;
 
 use crate::app::Mailbox;
 
 pub struct ImapMailboxListHandler;
 
 impl ImapMailboxListHandler {
-    pub fn execute(self, session: &mut ImapSession) -> Result<Vec<Mailbox>> {
+    pub fn execute(self, client: &mut ImapClientStd<StreamStd>) -> Result<Vec<Mailbox>> {
         let reference = "".try_into()?;
         let pattern = "*".try_into()?;
 
-        let context = std::mem::take(&mut session.context);
-        let mut arg = None;
-        let mut coroutine = ImapLsub::new(context, reference, pattern);
-
-        let mailboxes = loop {
-            match coroutine.resume(arg.take()) {
-                ImapLsubResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                ImapLsubResult::Ok { context, mailboxes } => {
-                    session.context = context;
-                    break mailboxes;
-                }
-                ImapLsubResult::Err { context, err } => {
-                    session.context = context;
-                    bail!(err);
-                }
-            }
-        };
+        let mailboxes = client.lsub(reference, pattern)?;
 
         let result = mailboxes
             .into_iter()
             .map(|(mbox, delim, _attrs)| {
                 let name = match mbox {
-                    io_imap::types::mailbox::Mailbox::Inbox => "INBOX".to_string(),
-                    io_imap::types::mailbox::Mailbox::Other(mbox) => {
+                    ImapMailbox::Inbox => "INBOX".to_string(),
+                    ImapMailbox::Other(mbox) => {
                         String::from_utf8_lossy(mbox.inner().as_ref()).to_string()
                     }
                 };

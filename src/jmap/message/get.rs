@@ -1,39 +1,20 @@
-use anyhow::{anyhow, bail, Result};
-use io_jmap::rfc8621::coroutines::email_get::{JmapEmailGet, JmapEmailGetResult};
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::jmap::JmapSession;
+use anyhow::{anyhow, Result};
+use io_jmap::client::JmapClientStd;
 
 pub struct JmapMessageGetHandler {
     pub id: String,
 }
 
 impl JmapMessageGetHandler {
-    pub fn execute(self, session: &mut JmapSession) -> Result<String> {
-        let mut coroutine = JmapEmailGet::new(
-            &session.session,
-            &session.http_auth,
-            vec![self.id],
-            None,
-            true,
-            true,
-            0,
-        )?;
-        let mut arg = None;
+    pub fn execute(self, client: &mut JmapClientStd) -> Result<String> {
+        let output = client.email_get(vec![self.id], None, true, true, 0)?;
 
-        let emails = loop {
-            match coroutine.resume(arg.take()) {
-                JmapEmailGetResult::Io { io } => arg = Some(handle(&mut session.stream, io)?),
-                JmapEmailGetResult::Ok { emails, .. } => break emails,
-                JmapEmailGetResult::Err { err } => bail!(err),
-            }
-        };
-
-        let email = emails
+        let email = output
+            .emails
             .into_iter()
             .next()
             .ok_or_else(|| anyhow!("Email not found"))?;
 
-        // Try plain text body first
         if let (Some(text_body), Some(body_values)) = (&email.text_body, &email.body_values) {
             if let Some(part) = text_body.first() {
                 if let Some(part_id) = &part.part_id {
@@ -44,7 +25,6 @@ impl JmapMessageGetHandler {
             }
         }
 
-        // Fall back to HTML body
         if let (Some(html_body), Some(body_values)) = (&email.html_body, &email.body_values) {
             if let Some(part) = html_body.first() {
                 if let Some(part_id) = &part.part_id {

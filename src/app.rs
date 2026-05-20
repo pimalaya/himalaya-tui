@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use edtui::{EditorMode, EditorState, Lines};
-use mml::template::{self, TemplateCursor};
+use mml::template::{
+    compose::builder::TemplateBuilderCompose, forward::builder::TemplateBuilderForward,
+    reply::builder::TemplateBuilderReply, types::TemplateCursor,
+};
 
 use crate::config::SmtpConfig;
 
@@ -503,12 +506,13 @@ impl App {
     }
 
     pub fn start_compose(&mut self) {
-        let tpl = template::new::build(template::new::BuildNewTemplateArgs {
+        let tpl = TemplateBuilderCompose {
             from: self.email.clone(),
-            from_name: self.display_name.clone(),
+            from_name: Some(self.display_name.clone()),
             signature: self.signature.clone(),
             ..Default::default()
-        });
+        }
+        .build();
 
         match tpl {
             Ok(tpl) => self.open_editor_with_template(&tpl.content, &tpl.cursor),
@@ -522,16 +526,14 @@ impl App {
             return;
         };
 
-        let tpl = template::reply::build(
-            &msg,
-            template::reply::BuildReplyTemplateArgs {
-                from: self.email.clone(),
-                from_name: self.display_name.clone(),
-                signature: self.signature.clone(),
-                reply_all,
-                ..Default::default()
-            },
-        );
+        let tpl = TemplateBuilderReply {
+            from: self.email.clone(),
+            from_name: Some(self.display_name.clone()),
+            signature: self.signature.clone(),
+            reply_all,
+            ..Default::default()
+        }
+        .build(&msg);
 
         match tpl {
             Ok(tpl) => self.open_editor_with_template(&tpl.content, &tpl.cursor),
@@ -545,15 +547,13 @@ impl App {
             return;
         };
 
-        let tpl = template::forward::build(
-            &msg,
-            template::forward::BuildForwardTemplateArgs {
-                from: self.email.clone(),
-                from_name: self.display_name.clone(),
-                signature: self.signature.clone(),
-                ..Default::default()
-            },
-        );
+        let tpl = TemplateBuilderForward {
+            from: self.email.clone(),
+            from_name: Some(self.display_name.clone()),
+            signature: self.signature.clone(),
+            ..Default::default()
+        }
+        .build(&msg);
 
         match tpl {
             Ok(tpl) => self.open_editor_with_template(&tpl.content, &tpl.cursor),

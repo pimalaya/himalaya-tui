@@ -1,11 +1,15 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Result;
-use pimalaya_toolbox::{
-    config::{shell_expanded_string, TomlConfig},
-    sasl::{sasl_default_mechanisms, Sasl, SaslAnonymous, SaslLogin, SaslMechanism, SaslPlain},
+use pimalaya_config::{
     secret::{Secret, SecretError},
-    stream::{Rustls, RustlsCrypto, Tls, TlsProvider},
+    toml::{shell_expanded_string, TomlConfig},
+};
+use pimalaya_stream::{
+    sasl::{
+        Sasl, SaslAnonymous, SaslLogin, SaslOauthbearer, SaslPlain, SaslScramSha256, SaslXoauth2,
+    },
+    tls::{Rustls, RustlsCrypto, Tls, TlsProvider},
 };
 use serde::Deserialize;
 use url::Url;
@@ -28,17 +32,16 @@ impl TomlConfig for Config {
         env!("CARGO_PKG_NAME")
     }
 
-    fn find_default_account(&self) -> Option<(String, Self::Account)> {
-        self.accounts
-            .iter()
-            .find(|(_, account)| account.default)
-            .map(|(name, account)| (name.to_owned(), account.clone()))
+    fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
+        self.accounts.remove_entry(name)
     }
 
-    fn find_account(&self, name: &str) -> Option<(String, Self::Account)> {
-        self.accounts
-            .get(name)
-            .map(|account| (name.to_owned(), account.clone()))
+    fn take_default_account(&mut self) -> Option<(String, Self::Account)> {
+        let name = self
+            .accounts
+            .iter()
+            .find_map(|(name, account)| account.default.then(|| name.clone()))?;
+        self.take_named_account(&name)
     }
 }
 
@@ -49,7 +52,6 @@ pub struct AccountConfig {
     pub default: bool,
     pub imap: Option<ImapConfig>,
     pub smtp: Option<SmtpConfig>,
-    #[cfg(feature = "jmap")]
     pub jmap: Option<JmapConfig>,
     #[serde(deserialize_with = "shell_expanded_string")]
     pub email: String,
@@ -61,56 +63,103 @@ pub struct AccountConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct SmtpConfig {
-    pub url: Url,
-    #[serde(default)]
-    pub tls: TlsConfig,
-    #[serde(default)]
-    pub starttls: bool,
-    #[serde(default)]
-    pub sasl: SaslConfig,
-}
-
-#[cfg(feature = "smtp")]
-impl SmtpConfig {
-    pub fn into_session(self) -> Result<pimalaya_toolbox::stream::smtp::SmtpSession> {
-        Ok(pimalaya_toolbox::stream::smtp::SmtpSession::new(
-            self.url,
-            self.tls.try_into()?,
-            self.starttls,
-            self.sasl.try_into()?,
-        )?)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ImapConfig {
-    pub url: Url,
+    /// IMAP server address. Either a bare authority
+    /// (`imap.example.com[:port]`, treated as `imaps://<authority>`),
+    /// or a full URL with `imap://` (cleartext, optional STARTTLS) or
+    /// `imaps://` (implicit TLS).
+    pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default)]
     pub starttls: bool,
-    #[serde(default)]
-    pub sasl: SaslConfig,
+    pub sasl: Option<SaslConfig>,
 }
 
 #[cfg(feature = "imap")]
 impl ImapConfig {
-    pub fn into_session(self) -> Result<pimalaya_toolbox::stream::imap::ImapSession> {
-        Ok(pimalaya_toolbox::stream::imap::ImapSession::new(
-            self.url,
-            self.tls.try_into()?,
+    pub fn into_client(
+        self,
+    ) -> Result<io_imap::client::ImapClientStd<pimalaya_stream::std::stream::StreamStd>> {
+        let mut tls: Tls = self.tls.try_into()?;
+        tls.rustls.alpn = vec!["imap".into()];
+        let sasl: Option<Sasl> = self.sasl.map(Sasl::try_from).transpose()?;
+        let server = parse_imap_server(&self.server)?;
+        Ok(io_imap::client::ImapClientStd::connect(
+            &server,
+            &tls,
             self.starttls,
-            self.sasl.try_into()?,
+            sasl,
         )?)
     }
 }
 
-#[cfg(feature = "jmap")]
+#[cfg(feature = "imap")]
+pub fn parse_imap_server(server: &str) -> Result<Url> {
+    match Url::parse(server) {
+        Ok(url) => Ok(url),
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            Ok(Url::parse(&format!("imaps://{server}"))?)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SmtpConfig {
+    /// SMTP server address. Either a bare authority
+    /// (`smtp.example.com[:port]`, treated as `smtps://<authority>`),
+    /// or a full URL with `smtp://` (cleartext, optional STARTTLS) or
+    /// `smtps://` (implicit TLS).
+    pub server: String,
+    #[serde(default)]
+    pub tls: TlsConfig,
+    #[serde(default)]
+    pub starttls: bool,
+    pub sasl: Option<SaslConfig>,
+}
+
+#[cfg(feature = "smtp")]
+impl SmtpConfig {
+    pub fn into_client(
+        self,
+    ) -> Result<io_smtp::client::SmtpClientStd<pimalaya_stream::std::stream::StreamStd>> {
+        use std::net::Ipv4Addr;
+
+        use io_smtp::rfc5321::types::ehlo_domain::EhloDomain;
+
+        let mut tls: Tls = self.tls.try_into()?;
+        tls.rustls.alpn = vec!["smtp".into()];
+        let sasl: Option<Sasl> = self.sasl.map(Sasl::try_from).transpose()?;
+        let domain: EhloDomain<'static> = Ipv4Addr::new(127, 0, 0, 1).into();
+        let server = parse_smtp_server(&self.server)?;
+        Ok(io_smtp::client::SmtpClientStd::connect(
+            &server,
+            &tls,
+            self.starttls,
+            domain,
+            sasl,
+        )?)
+    }
+}
+
+#[cfg(feature = "smtp")]
+pub fn parse_smtp_server(server: &str) -> Result<Url> {
+    match Url::parse(server) {
+        Ok(url) => Ok(url),
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            Ok(Url::parse(&format!("smtps://{server}"))?)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JmapConfig {
+    /// JMAP server address. Either a bare authority for `/.well-known/jmap`
+    /// discovery, or a full session-endpoint URL.
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
@@ -119,29 +168,61 @@ pub struct JmapConfig {
 
 #[cfg(feature = "jmap")]
 impl JmapConfig {
-    pub fn into_session(self) -> Result<pimalaya_toolbox::stream::jmap::JmapSession> {
-        use pimalaya_toolbox::stream::jmap::{JmapAuth, JmapSession};
+    pub fn into_client(self) -> Result<io_jmap::client::JmapClientStd> {
+        let mut tls: Tls = self.tls.try_into()?;
+        tls.rustls.alpn = vec!["http/1.1".into()];
 
-        let auth = match self.auth {
-            JmapAuthConfig::Bearer { token } => JmapAuth::Bearer(token.get()?.into()),
-            JmapAuthConfig::Basic { username, password } => JmapAuth::Basic {
-                username,
-                password: password.get()?.into(),
-            },
-            JmapAuthConfig::Header { value } => JmapAuth::Header(value.get()?.into()),
-        };
+        let http_auth = jmap_http_auth(self.auth)?;
+        let url = parse_jmap_server(&self.server)?;
 
-        Ok(JmapSession::new(self.server, self.tls.try_into()?, auth)?)
+        let mut client = io_jmap::client::JmapClientStd::connect(&url, &tls, http_auth)?;
+        client.session_get(&url)?;
+        Ok(client)
     }
 }
 
 #[cfg(feature = "jmap")]
+pub fn parse_jmap_server(server: &str) -> Result<Url> {
+    match Url::parse(server) {
+        Ok(url) => Ok(url),
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            Ok(Url::parse(&format!("https://{server}"))?)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(feature = "jmap")]
+pub fn jmap_http_auth(config: JmapAuthConfig) -> Result<secrecy::SecretString> {
+    use base64::{prelude::BASE64_STANDARD, Engine};
+    use secrecy::ExposeSecret;
+
+    match config {
+        JmapAuthConfig::Header(token) => Ok(token.get()?),
+        JmapAuthConfig::Bearer { token } => {
+            let token = token.get()?;
+            Ok(format!("Bearer {}", token.expose_secret()).into())
+        }
+        JmapAuthConfig::Basic { username, password } => {
+            let creds = format!("{}:{}", username, password.get()?.expose_secret());
+            let encoded = BASE64_STANDARD.encode(creds.into_bytes());
+            Ok(format!("Basic {encoded}").into())
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum JmapAuthConfig {
-    Bearer { token: Secret },
-    Basic { username: String, password: Secret },
-    Header { value: Secret },
+    Header(Secret),
+    Bearer {
+        token: Secret,
+    },
+    Basic {
+        #[serde(deserialize_with = "shell_expanded_string")]
+        username: String,
+        password: Secret,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -178,36 +259,38 @@ impl TryFrom<TlsConfig> for Tls {
 
     fn try_from(config: TlsConfig) -> Result<Self, Self::Error> {
         Ok(Tls {
-            provider: config.provider.map(|config| match config {
+            provider: config.provider.map(|p| match p {
                 TlsProviderConfig::Rustls => TlsProvider::Rustls,
                 TlsProviderConfig::NativeTls => TlsProvider::NativeTls,
             }),
             rustls: Rustls {
-                crypto: config.rustls.crypto.map(|config| match config {
+                crypto: config.rustls.crypto.map(|c| match c {
                     RustlsCryptoConfig::Aws => RustlsCrypto::Aws,
                     RustlsCryptoConfig::Ring => RustlsCrypto::Ring,
                 }),
+                alpn: Vec::new(),
             },
             cert: config.cert,
         })
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct SaslConfig {
-    pub mechanisms: Option<Vec<SaslMechanismConfig>>,
-    pub login: Option<SaslLoginConfig>,
-    pub plain: Option<SaslPlainConfig>,
-    pub anonymous: Option<SaslAnonymousConfig>,
+pub enum SaslConfig {
+    Anonymous(SaslAnonymousConfig),
+    Login(SaslLoginConfig),
+    Plain(SaslPlainConfig),
+    Oauthbearer(SaslOauthbearerConfig),
+    Xoauth2(SaslXoauth2Config),
+    #[serde(rename = "scram-sha-256")]
+    ScramSha256(SaslScramSha256Config),
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SaslMechanismConfig {
-    Login,
-    Plain,
-    Anonymous,
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SaslAnonymousConfig {
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -229,47 +312,59 @@ pub struct SaslPlainConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct SaslAnonymousConfig {
-    pub message: Option<String>,
+pub struct SaslOauthbearerConfig {
+    #[serde(deserialize_with = "shell_expanded_string")]
+    pub username: String,
+    pub host: String,
+    pub port: u16,
+    pub token: Secret,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SaslXoauth2Config {
+    #[serde(deserialize_with = "shell_expanded_string")]
+    pub username: String,
+    pub token: Secret,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SaslScramSha256Config {
+    #[serde(deserialize_with = "shell_expanded_string")]
+    pub username: String,
+    pub password: Secret,
 }
 
 impl TryFrom<SaslConfig> for Sasl {
-    type Error = SecretError;
+    type Error = anyhow::Error;
 
-    fn try_from(config: SaslConfig) -> Result<Self, Self::Error> {
-        Ok(Sasl {
-            mechanisms: match config.mechanisms {
-                None => sasl_default_mechanisms(),
-                Some(config) => config
-                    .into_iter()
-                    .map(|m| match m {
-                        SaslMechanismConfig::Anonymous => SaslMechanism::Anonymous,
-                        SaslMechanismConfig::Plain => SaslMechanism::Plain,
-                        SaslMechanismConfig::Login => SaslMechanism::Login,
-                    })
-                    .collect(),
-            },
-            anonymous: match config.anonymous {
-                None => None,
-                Some(config) => Some(SaslAnonymous {
-                    message: config.message,
-                }),
-            },
-            plain: match config.plain {
-                None => None,
-                Some(config) => Some(SaslPlain {
-                    authzid: config.authzid,
-                    authcid: config.authcid,
-                    passwd: config.passwd.get()?,
-                }),
-            },
-            login: match config.login {
-                None => None,
-                Some(config) => Some(SaslLogin {
-                    username: config.username,
-                    password: config.password.get()?,
-                }),
-            },
+    fn try_from(config: SaslConfig) -> Result<Self> {
+        Ok(match config {
+            SaslConfig::Anonymous(c) => Sasl::Anonymous(SaslAnonymous { message: c.message }),
+            SaslConfig::Login(c) => Sasl::Login(SaslLogin {
+                username: c.username,
+                password: c.password.get()?,
+            }),
+            SaslConfig::Plain(c) => Sasl::Plain(SaslPlain {
+                authzid: c.authzid,
+                authcid: c.authcid,
+                passwd: c.passwd.get()?,
+            }),
+            SaslConfig::Oauthbearer(c) => Sasl::Oauthbearer(SaslOauthbearer {
+                username: c.username,
+                host: c.host,
+                port: c.port,
+                token: c.token.get()?,
+            }),
+            SaslConfig::Xoauth2(c) => Sasl::Xoauth2(SaslXoauth2 {
+                username: c.username,
+                token: c.token.get()?,
+            }),
+            SaslConfig::ScramSha256(c) => Sasl::ScramSha256(SaslScramSha256 {
+                username: c.username,
+                password: c.password.get()?,
+            }),
         })
     }
 }
