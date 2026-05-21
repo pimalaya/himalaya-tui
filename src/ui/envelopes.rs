@@ -20,13 +20,13 @@ use ratatui::{
     Frame,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table},
+    widgets::{Block, Borders, Cell, Row, Table, TableState},
 };
 
 use super::get_border_style;
 use crate::app::{App, Panel};
 
-pub fn render_envelopes(frame: &mut Frame, app: &App, area: Rect) {
+pub fn render_envelopes(frame: &mut Frame, app: &mut App, area: Rect) {
     let header_cells = ["Flags", "Subject", "From", "Date"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
@@ -37,14 +37,8 @@ pub fn render_envelopes(frame: &mut Frame, app: &App, area: Rect) {
     let rows: Vec<Row> = app
         .envelopes
         .iter()
-        .enumerate()
-        .map(|(i, envelope)| {
-            let style = if i == app.envelope_index && app.active_panel == Panel::Envelopes {
-                Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
-            } else if envelope.flags.contains(&Flag::Seen) {
+        .map(|envelope| {
+            let style = if envelope.flags.contains(&Flag::Seen) {
                 Style::default().fg(Color::Gray)
             } else {
                 Style::default().add_modifier(Modifier::BOLD)
@@ -88,9 +82,35 @@ pub fn render_envelopes(frame: &mut Frame, app: &App, area: Rect) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)
-        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .row_highlight_style(
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
 
-    frame.render_widget(table, area);
+    // Page-style scrolling: when the cursor leaves the visible
+    // window, snap the offset so the new selection sits at the page
+    // edge (top when going down, bottom when going up).
+    //
+    // Inner height accounts for top/bottom borders (-2) and the
+    // header row (-1).
+    let inner_height = area.height.saturating_sub(3) as usize;
+    if inner_height > 0 {
+        if app.envelope_index >= app.envelope_offset + inner_height {
+            app.envelope_offset = app.envelope_index;
+        } else if app.envelope_index < app.envelope_offset {
+            app.envelope_offset = app
+                .envelope_index
+                .saturating_sub(inner_height.saturating_sub(1));
+        }
+    }
+
+    let mut state = TableState::default().with_offset(app.envelope_offset);
+    if app.active_panel == Panel::Envelopes {
+        state.select(Some(app.envelope_index));
+    }
+    frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn format_flags(envelope: &Envelope) -> String {

@@ -178,7 +178,7 @@ fn render_dialog(frame: &mut Frame, selected_index: usize, title: &str, labels: 
             let style = if i == selected_index {
                 Style::default()
                     .bg(Color::Cyan)
-                    .fg(Color::Black)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)

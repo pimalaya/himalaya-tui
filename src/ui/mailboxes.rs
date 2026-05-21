@@ -20,24 +20,18 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, ListState},
 };
 
 use super::get_border_style;
 use crate::app::{App, Panel};
 
-pub fn render_mailboxes(frame: &mut Frame, app: &App, area: Rect) {
+pub fn render_mailboxes(frame: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = app
         .mailboxes
         .iter()
-        .enumerate()
-        .map(|(i, mailbox)| {
-            let style = if i == app.mailbox_index && app.active_panel == Panel::Mailboxes {
-                Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
-            } else if Some(&mailbox.id) == app.selected_mailbox.as_ref() {
+        .map(|mailbox| {
+            let style = if Some(&mailbox.id) == app.selected_mailbox.as_ref() {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -54,7 +48,32 @@ pub fn render_mailboxes(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(get_border_style(app, Panel::Mailboxes));
 
-    let list = List::new(items).block(block);
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(Color::Cyan)
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
 
-    frame.render_widget(list, area);
+    // Page-style scrolling: when the cursor leaves the visible
+    // window, snap the offset so the new selection sits at the page
+    // edge (top when going down, bottom when going up).
+    //
+    // Inner height accounts for top/bottom borders (-2). No header.
+    let inner_height = area.height.saturating_sub(2) as usize;
+    if inner_height > 0 {
+        if app.mailbox_index >= app.mailbox_offset + inner_height {
+            app.mailbox_offset = app.mailbox_index;
+        } else if app.mailbox_index < app.mailbox_offset {
+            app.mailbox_offset = app
+                .mailbox_index
+                .saturating_sub(inner_height.saturating_sub(1));
+        }
+    }
+
+    let mut state = ListState::default().with_offset(app.mailbox_offset);
+    if app.active_panel == Panel::Mailboxes {
+        state.select(Some(app.mailbox_index));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
 }

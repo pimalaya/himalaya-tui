@@ -177,8 +177,10 @@ pub struct App {
     pub active_panel: Panel,
     pub mailboxes: Vec<Mailbox>,
     pub mailbox_index: usize,
+    pub mailbox_offset: usize,
     pub envelopes: Vec<Envelope>,
     pub envelope_index: usize,
+    pub envelope_offset: usize,
     pub envelope_page: usize,
     pub envelope_page_size: usize,
     pub envelope_total: u32,
@@ -211,8 +213,10 @@ impl Default for App {
             active_panel: Panel::Mailboxes,
             mailboxes: Vec::new(),
             mailbox_index: 0,
+            mailbox_offset: 0,
             envelopes: Vec::new(),
             envelope_index: 0,
+            envelope_offset: 0,
             envelope_page: 0,
             envelope_page_size: 50,
             envelope_total: 0,
@@ -287,6 +291,7 @@ impl App {
         self.selected_mailbox = None;
         self.envelopes.clear();
         self.envelope_index = 0;
+        self.envelope_offset = 0;
         self.envelope_page = 0;
         self.envelope_total = 0;
         self.close_bottom_panel();
@@ -313,13 +318,13 @@ impl App {
     pub fn next_item(&mut self) {
         match self.active_panel {
             Panel::Mailboxes => {
-                if !self.mailboxes.is_empty() {
-                    self.mailbox_index = (self.mailbox_index + 1) % self.mailboxes.len();
+                if self.mailbox_index + 1 < self.mailboxes.len() {
+                    self.mailbox_index += 1;
                 }
             }
             Panel::Envelopes => {
-                if !self.envelopes.is_empty() {
-                    self.envelope_index = (self.envelope_index + 1) % self.envelopes.len();
+                if self.envelope_index + 1 < self.envelopes.len() {
+                    self.envelope_index += 1;
                 }
             }
             Panel::Message => {
@@ -332,20 +337,10 @@ impl App {
     pub fn previous_item(&mut self) {
         match self.active_panel {
             Panel::Mailboxes => {
-                if !self.mailboxes.is_empty() {
-                    self.mailbox_index = self
-                        .mailbox_index
-                        .checked_sub(1)
-                        .unwrap_or(self.mailboxes.len() - 1);
-                }
+                self.mailbox_index = self.mailbox_index.saturating_sub(1);
             }
             Panel::Envelopes => {
-                if !self.envelopes.is_empty() {
-                    self.envelope_index = self
-                        .envelope_index
-                        .checked_sub(1)
-                        .unwrap_or(self.envelopes.len() - 1);
-                }
+                self.envelope_index = self.envelope_index.saturating_sub(1);
             }
             Panel::Message => {
                 self.message_scroll = self.message_scroll.saturating_sub(1);
@@ -360,6 +355,7 @@ impl App {
         if let Some(m) = mailbox {
             self.selected_mailbox = Some(m.id.clone());
             self.envelope_index = 0;
+            self.envelope_offset = 0;
             self.envelope_page = 0;
             self.envelope_total = 0;
             self.envelopes.clear();
@@ -393,6 +389,7 @@ impl App {
     pub fn set_envelopes(&mut self, envelopes: Vec<Envelope>, total: u32) {
         self.envelopes = envelopes;
         self.envelope_index = 0;
+        self.envelope_offset = 0;
         self.envelope_total = total;
         self.status_message = None;
     }
