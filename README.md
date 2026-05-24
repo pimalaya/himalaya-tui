@@ -11,7 +11,7 @@
 ![screenshot](./screenshot.jpeg)
 
 > [!CAUTION]
-> Himalaya TUI is in active development and currently shipped as `v0.0.1`. Expect breaking changes between releases; the [CLI counterpart](https://github.com/pimalaya/himalaya) remains the stable interface for production use.
+> Himalaya TUI is in active development and currently shipped as `v0.x.x`. Expect breaking changes between releases until stabilization.
 
 ## Table of contents
 
@@ -139,29 +139,27 @@ Presets live as plain Rust files under [src/themes](./src/themes/) and are shipp
 
 ### Keybindings
 
-Top-level navigation:
+Top-level navigation, supporting Vim and Emacs keybinds:
 
-| Action | Universal | Vim flavor | Emacs flavor |
-|---|---|---|---|
-| Cycle panel | `Tab` | `Tab` | `Tab` |
-| Next item | `↓` | `j` | `Ctrl-n` |
-| Previous item | `↑` | `k` | `Ctrl-p` |
-| Next page | `PageDown` | `Ctrl-d` | `Ctrl-v` |
-| Previous page | `PageUp` | `Ctrl-u` | `Alt-v` |
-| Select | `Enter` | `Enter` | `Enter` |
-| Close panel / dialog / quit | `Esc` | `q` | `Ctrl-g` |
-| Start a new draft | `Ctrl-c` | `Ctrl-c` | `Ctrl-c` |
-
-All three columns are always active: the Vim and Emacs aliases don't overlap, so they fire alongside the universal keys without any setup. The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) only affects the in-app composer's edtui handler; it doesn't gate top-level navigation.
+| Keybind | Action |
+|---|---|
+| `Tab` | Cycle panel |
+| `↓`, `j`, `Ctrl-n` | Next item |
+| `↑`, `k`, `Ctrl-p` | Previous item |
+| `PageDown`, `Ctrl-d`, `Ctrl-v` | Next page |
+| `PageUp`, `Ctrl-u`, `Alt-v` | Previous page |
+| `Enter` | Select |
+| `Esc`, `q`, `Ctrl-g` | Close panel / dialog / quit |
+| `Ctrl-c` | Start a new draft |
 
 Composer:
 
 | Key | Action |
 |---|---|
-| `Ctrl-e` (Vim) / `Alt-e` | Hand off to `$VISUAL` or `$EDITOR` for the current draft |
+| `Ctrl-e`, `Alt-e` | Hand off to `$VISUAL` or `$EDITOR` for the current draft |
 | `Esc` | Open the compose actions dialog (Send, Preview, Save to Drafts, Cancel) |
 
-Inside the composer, the chosen flavor drives [edtui](https://crates.io/crates/edtui)'s built-in keybindings (Vim normal/insert vs. Emacs insert-style). In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
+The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) changes the in-app composer's edtui keybinds. In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
 
 Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag.
 

@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Configuration file is shared with the [`himalaya`](https://github.com/pimalaya/himalaya) CLI: same `[accounts.<name>]` blocks load on both binaries; TUI-only and CLI-only fields coexist.
 - In-app composer based on [edtui](https://crates.io/crates/edtui) with `Alt-e` system-editor handoff; drafts are written in [MML](https://github.com/pimalaya/mml).
 - Provider discovery wizard: PACC, Thunderbird Autoconfiguration (ISP, ISP-fallback, ISPDB), RFC 6186 SRV.
-- Backend support: IMAP, JMAP, Maildir, SMTP (via [io-email](https://github.com/pimalaya/io-email) and the matching `io-*` crates).
+- Backend support: IMAP, JMAP, SMTP, Maildir and m2dir (via [io-email](https://github.com/pimalaya/io-email) and the matching `io-*` crates).
 - SASL mechanisms: anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256.
 - Color themes: built-in presets (`default`, `dracula-dark`, `one-light`) plus per-field `[theme.*]` overrides in the TOML config (`fg`, `bg`, `mod`).
 - `himalaya-tui completions <shell>` and `himalaya-tui manuals <dir>` auxiliary subcommands.

@@ -1,19 +1,19 @@
 // This file is part of Himalaya TUI, a TUI to manage emails.
 //
-// Copyright (C) 2025-2026 soywod <pimalaya.org@posteo.net>
+// Copyright (C) 2025-2026  soywod <pimalaya.org@posteo.net>
 //
-// This program is free software: you can redistribute it and/or modify it under
-// the terms of the GNU Affero General Public License as published by the Free
-// Software Foundation, either version 3 of the License, or (at your option) any
-// later version.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 //
-// This program is distributed in the hope that it will be useful, but WITHOUT
-// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-// FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
-// details.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
 //
 // You should have received a copy of the GNU Affero General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //! Clap-driven command-line interface for the `himalaya-tui` binary.
 
@@ -23,7 +23,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use pimalaya_cli::{
     clap::{
-        args::{AccountFlag, JsonFlag},
+        args::{AccountFlag, JsonFlag, LogFlags},
         commands::{CompletionCommand, ManualCommand},
         parsers::path_parser,
     },
@@ -53,10 +53,8 @@ pub struct HimalayaTui {
     /// the TOML config (if present), otherwise to Vim.
     #[arg(long, value_name = "FLAVOR", value_enum)]
     pub keybinds: Option<Keybinds>,
-
     #[command(flatten)]
     pub account: AccountFlag,
-
     /// Override the default configuration file path.
     ///
     /// The given paths are shell-expanded then canonicalized (if
@@ -79,9 +77,10 @@ pub struct HimalayaTui {
     /// set.
     #[arg(long = "no-config")]
     pub no_config: bool,
-
     #[command(flatten)]
     pub json: JsonFlag,
+    #[command(flatten)]
+    pub log: LogFlags,
 }
 
 /// Auxiliary subcommands. When none is given, the binary launches the
