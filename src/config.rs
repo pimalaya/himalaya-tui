@@ -254,14 +254,12 @@ pub struct ImapConfig {
 
 #[cfg(feature = "imap")]
 impl ImapConfig {
-    pub fn into_client(
-        self,
-    ) -> Result<io_imap::client::ImapClientStd<pimalaya_stream::std::stream::StreamStd>> {
+    pub fn into_client(self) -> Result<io_email::imap::client::ImapClientStd> {
         let mut tls: Tls = self.tls.try_into()?;
         tls.rustls.alpn = vec!["imap".into()];
         let sasl: Option<Sasl> = self.sasl.map(Sasl::try_from).transpose()?;
         let server = parse_imap_server(&self.server)?;
-        Ok(io_imap::client::ImapClientStd::connect(
+        Ok(io_email::imap::client::ImapClientStd::connect(
             &server,
             &tls,
             self.starttls,
@@ -298,9 +296,7 @@ pub struct SmtpConfig {
 
 #[cfg(feature = "smtp")]
 impl SmtpConfig {
-    pub fn into_client(
-        self,
-    ) -> Result<io_smtp::client::SmtpClientStd<pimalaya_stream::std::stream::StreamStd>> {
+    pub fn into_client(self) -> Result<io_email::smtp::client::SmtpClientStd> {
         use std::net::Ipv4Addr;
 
         use io_smtp::rfc5321::types::ehlo_domain::EhloDomain;
@@ -310,7 +306,7 @@ impl SmtpConfig {
         let sasl: Option<Sasl> = self.sasl.map(Sasl::try_from).transpose()?;
         let domain: EhloDomain<'static> = Ipv4Addr::new(127, 0, 0, 1).into();
         let server = parse_smtp_server(&self.server)?;
-        Ok(io_smtp::client::SmtpClientStd::connect(
+        Ok(io_email::smtp::client::SmtpClientStd::connect(
             &server,
             &tls,
             self.starttls,
@@ -347,16 +343,15 @@ pub struct JmapConfig {
 
 #[cfg(feature = "jmap")]
 impl JmapConfig {
-    pub fn into_client(self) -> Result<io_jmap::client::JmapClientStd> {
+    pub fn into_client(self) -> Result<io_email::jmap::client::JmapClientStd> {
         let mut tls: Tls = self.tls.try_into()?;
         tls.rustls.alpn = vec!["http/1.1".into()];
 
         let http_auth = jmap_http_auth(self.auth)?;
         let url = parse_jmap_server(&self.server)?;
-
-        let mut client = io_jmap::client::JmapClientStd::connect(&url, &tls, http_auth)?;
-        client.session_get(&url)?;
-        Ok(client)
+        Ok(io_email::jmap::client::JmapClientStd::connect(
+            &url, &tls, http_auth,
+        )?)
     }
 }
 
@@ -416,9 +411,8 @@ pub struct MaildirConfig {
 
 #[cfg(feature = "maildir")]
 impl MaildirConfig {
-    pub fn into_client(self) -> io_maildir::client::MaildirClient {
-        let root = io_maildir::path::MaildirPath::new(self.root.to_string_lossy().into_owned());
-        io_maildir::client::MaildirClient::new(root)
+    pub fn into_client(self) -> io_email::maildir::client::MaildirClient {
+        io_email::maildir::client::MaildirClient::new(self.root.to_string_lossy().into_owned())
     }
 }
 
@@ -433,9 +427,8 @@ pub struct M2dirConfig {
 
 #[cfg(feature = "m2dir")]
 impl M2dirConfig {
-    pub fn into_client(self) -> io_m2dir::client::M2dirClient {
-        let root = io_m2dir::path::M2dirPath::new(self.root.to_string_lossy().into_owned());
-        io_m2dir::client::M2dirClient::new(root)
+    pub fn into_client(self) -> io_email::m2dir::client::M2dirClient {
+        io_email::m2dir::client::M2dirClient::new(self.root.to_string_lossy().into_owned())
     }
 }
 

@@ -23,10 +23,6 @@
 //! `defaults` converts a successful [`Autoconfig`] into the
 //! [`DiscoveryResult`] shape consumed by the candidate list.
 
-use io_discovery::autoconfig::{
-    client::DiscoveryAutoconfigClientStd,
-    types::{Autoconfig, SecurityType, Server, ServerType},
-};
 use log::debug;
 use pimalaya_cli::{
     spinner::Spinner,
@@ -34,6 +30,10 @@ use pimalaya_cli::{
         imap::{Encryption as ImapEncryption, ImapAuth, ImapSecret, WizardImapConfig},
         smtp::{Encryption as SmtpEncryption, SmtpAuth, SmtpSecret, WizardSmtpConfig},
     },
+};
+use pimconf::autoconfig::{
+    client::DiscoveryAutoconfigClientStd,
+    types::{Autoconfig, SecurityType, Server, ServerType},
 };
 
 use crate::wizard::discover::{DiscoveryResult, discovery_resolver, discovery_tls};
@@ -64,10 +64,8 @@ fn run_probe<F>(label: &str, domain: &str, op: F) -> Option<Autoconfig>
 where
     F: Fn(
         &mut DiscoveryAutoconfigClientStd,
-    ) -> Result<
-        Autoconfig,
-        io_discovery::autoconfig::client::DiscoveryAutoconfigClientStdError,
-    >,
+    )
+        -> Result<Autoconfig, pimconf::autoconfig::client::DiscoveryAutoconfigClientStdError>,
 {
     let mut client =
         DiscoveryAutoconfigClientStd::new(discovery_resolver()).with_tls(discovery_tls());

@@ -14,7 +14,7 @@
 }:
 
 let
-  version = "0.0.1";
+  version = "0.1.0";
   emul = stdenv.hostPlatform.emulator buildPackages;
   exe = stdenv.hostPlatform.extensions.executable;
 
@@ -68,7 +68,7 @@ rustPlatform.buildRustPackage {
     description = "TUI to manage emails";
     mainProgram = "himalaya-tui";
     homepage = "https://github.com/pimalaya/himalaya-tui";
-    changelog = "https://github.com/pimalaya/himalaya-tui/blob/v${version}/CHANGELOG.md";
+    changelog = "https://github.com/pimalaya/himalaya-tui/blob/master/CHANGELOG.md";
     license = lib.licenses.agpl3Only;
     maintainers = with lib.maintainers; [ soywod ];
   };

@@ -1,13 +1,13 @@
 [package]
 name = "himalaya-tui"
 description = "TUI to manage emails"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["soywod <pimalaya.org@posteo.net>"]
 rust-version = "1.88"
 edition = "2024"
 license = "AGPL-3.0-only"
 categories = ["command-line-utilities", "email"]
-keywords = ["tui", "email", "imap", "ratatui"]
+keywords = ["tui", "email", "imap", "ratatui", "jmap"]
 homepage = "https://pimalaya.org"
 documentation = "https://github.com/pimalaya/himalaya-tui"
 repository = "https://github.com/pimalaya/himalaya-tui"
@@ -17,15 +17,15 @@ features = ["imap"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["imap", "smtp", "jmap", "maildir", "m2dir", "rustls-ring"]
+default = ["rustls-ring", "imap", "smtp", "jmap", "maildir", "m2dir"]
 imap = ["dep:io-imap", "io-imap/client", "io-email/imap", "pimalaya-cli/imap"]
 smtp = ["dep:io-smtp", "io-smtp/client", "io-email/smtp", "pimalaya-cli/smtp"]
 jmap = ["dep:io-jmap", "dep:base64", "io-jmap/client", "io-email/jmap", "pimalaya-cli/jmap"]
 maildir = ["dep:io-maildir", "io-maildir/client", "io-email/maildir"]
 m2dir = ["dep:io-m2dir", "io-m2dir/client", "io-email/m2dir"]
-native-tls = ["pimalaya-stream/native-tls", "io-discovery/native-tls", "io-imap?/native-tls", "io-jmap?/native-tls", "io-smtp?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-discovery/rustls-aws", "io-imap?/rustls-aws", "io-jmap?/rustls-aws", "io-smtp?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-discovery/rustls-ring", "io-imap?/rustls-ring", "io-jmap?/rustls-ring", "io-smtp?/rustls-ring"]
+native-tls = ["pimalaya-stream/native-tls", "pimconf/native-tls", "io-email/native-tls", "io-imap?/native-tls", "io-jmap?/native-tls", "io-smtp?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "pimconf/rustls-aws", "io-email/rustls-aws", "io-imap?/rustls-aws", "io-jmap?/rustls-aws", "io-smtp?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "pimconf/rustls-ring", "io-email/rustls-ring", "io-imap?/rustls-ring", "io-jmap?/rustls-ring", "io-smtp?/rustls-ring"]
 vendored = ["pimalaya-stream/vendored"]
 
 [profile.release]
@@ -44,7 +44,6 @@ chrono = { version = "0.4", default-features = false }
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
-io-discovery = { version = "0.1.0", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "client"] }
 io-email = { version = "0.0.1", default-features = false, features = ["client"] }
 io-imap = { version = "0.0.1", default-features = false, optional = true }
 io-jmap = { version = "0.0.1", default-features = false, optional = true }
@@ -53,10 +52,11 @@ io-maildir = { version = "0.0.1", default-features = false, optional = true }
 io-smtp = { version = "0.0.1", default-features = false, optional = true }
 log = "0.4"
 mail-parser = "0.11"
-mml = { version = "1", default-features = false, features = ["compiler", "interpreter"] }
+mime-meta-language = { version = "1", default-features = false, features = ["compiler", "interpreter"] }
 pimalaya-cli = { version = "0.0.1", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
 pimalaya-config = { version = "0.0.1", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.0.1", default-features = false, features = ["std"] }
+pimconf = { version = "0.1.0", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "client"] }
 ratatui = { version = "0.30", features = ["serde"] }
 rfc2047-decoder = "1"
 secrecy = "0.10"
@@ -73,7 +73,6 @@ uds_windows = "1"
 
 # [patch.crates-io]
 # domain = { git = "https://github.com/soywod/domain", branch = "new-srv" }
-# io-discovery.path = "../io-discovery"
 # io-email.path = "../io-email"
 # io-http.path = "../io-http"
 # io-imap.path = "../io-imap"
@@ -81,14 +80,15 @@ uds_windows = "1"
 # io-m2dir.path = "../io-m2dir"
 # io-maildir.path = "../io-maildir"
 # io-smtp.path = "../io-smtp"
-# mml.path = "../mml"
+# mime-meta-language.path = "../mml"
 # pimalaya-cli.path = "../cli"
 # pimalaya-config.path = "../config"
 # pimalaya-stream.path = "../stream"
+# pimconf.path = "../pimconf"
 
 [patch.crates-io]
 domain = { git = "https://github.com/soywod/domain", branch = "new-srv" }
-io-discovery.git = "https://github.com/pimalaya/io-discovery"
+imap-codec.git = "https://github.com/soywod/imap-codec"
 io-email.git = "https://github.com/pimalaya/io-email"
 io-http.git = "https://github.com/pimalaya/io-http"
 io-imap.git = "https://github.com/pimalaya/io-imap"
@@ -96,7 +96,8 @@ io-jmap.git = "https://github.com/pimalaya/io-jmap"
 io-m2dir.git = "https://github.com/pimalaya/io-m2dir"
 io-maildir.git = "https://github.com/pimalaya/io-maildir"
 io-smtp.git = "https://github.com/pimalaya/io-smtp"
-mml.git = "https://github.com/pimalaya/mml"
+mime-meta-language.git = "https://github.com/pimalaya/mml"
 pimalaya-cli.git = "https://github.com/pimalaya/cli"
 pimalaya-config.git = "https://github.com/pimalaya/config"
 pimalaya-stream.git = "https://github.com/pimalaya/stream"
+pimconf.git = "https://github.com/pimalaya/pimconf"

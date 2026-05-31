@@ -35,11 +35,11 @@ Himalaya TUI is a thin terminal front-end on top of the [Pimalaya](https://githu
 
 - [io-email](https://github.com/pimalaya/io-email): cross-protocol email client (`EmailClientStd`, shared `Envelope` / `Mailbox` / `Flag` types).
 - [io-imap](https://github.com/pimalaya/io-imap), [io-jmap](https://github.com/pimalaya/io-jmap), [io-maildir](https://github.com/pimalaya/io-maildir), [io-smtp](https://github.com/pimalaya/io-smtp): per-protocol I/O-free coroutines and their std-blocking clients.
-- [io-discovery](https://github.com/pimalaya/io-discovery): provider discovery (PACC, Thunderbird Autoconfiguration, RFC 6186 SRV) consumed by the wizard.
 - [pimalaya/stream](https://github.com/pimalaya/stream): TCP / TLS / SASL plumbing shared by all std clients.
 - [pimalaya/cli](https://github.com/pimalaya/cli): cross-binary CLI helpers (prompt, wizard primitives, clap args, build-time env, spinner).
 - [pimalaya/config](https://github.com/pimalaya/config): TOML configuration loader and shell-expanded secrets.
 - [pimalaya/mml](https://github.com/pimalaya/mml): MIME Meta Language used by the composer.
+- [pimconf](https://github.com/pimalaya/pimconf): PIM service discovery (PACC, Thunderbird Autoconfiguration, RFC 6186 SRV) consumed by the wizard.
 
 Bugs touching protocol semantics usually live in the matching `io-*` crate; rendering, key handling and the wizard flow live here.
 
@@ -49,7 +49,6 @@ Bugs touching protocol semantics usually live in the matching `io-*` crate; rend
 
 ```toml
 [patch.crates-io]
-io-discovery.path = "../io-discovery"
 io-email.path = "../io-email"
 io-http.path = "../io-http"
 io-imap.path = "../io-imap"
@@ -60,6 +59,7 @@ mml.path = "../mml"
 pimalaya-cli.path = "../cli"
 pimalaya-config.path = "../config"
 pimalaya-stream.path = "../stream"
+pimconf.path = "../pimconf"
 ```
 
 To build against the published `master` of each lib, swap the matching `.path = "../<repo>"` for `.git = "https://github.com/pimalaya/<repo>"` (the commented block at the bottom of `Cargo.toml` lists them all).

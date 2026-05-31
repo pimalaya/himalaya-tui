@@ -21,18 +21,16 @@
 //! All I/O goes through `model.client`; the model is the sole owner
 //! of both UI state and the email client.
 
-use std::collections::HashSet;
-
 use anyhow::{Result, bail};
 use edtui::{
     EditorMode, EditorState, Index2, Lines,
     actions::{Execute, OpenSystemEditor},
 };
 use io_email::{
-    flag::{Flag, IanaFlag},
+    flag::{Flag, FlagOp, IanaFlag},
     mailbox::Mailbox,
 };
-use mail_parser::{Addr, Address, HeaderName, HeaderValue, MessageParser};
+use mail_parser::MessageParser;
 use mml::{
     compiler::message::MmlCompilerBuilder,
     template::{
@@ -738,15 +736,10 @@ fn do_flag(model: &mut Model, add: bool) {
     let verb = if add { "Adding" } else { "Removing" };
     set_status(model, format!("{verb} flag {label}…"));
 
-    let result = if add {
-        model
-            .client
-            .add_flags(&mailbox, &[&envelope.id], &[flag.clone()])
-    } else {
-        model
-            .client
-            .delete_flags(&mailbox, &[&envelope.id], &[flag.clone()])
-    };
+    let op = if add { FlagOp::Add } else { FlagOp::Remove };
+    let result = model
+        .client
+        .store_flags(&mailbox, &[&envelope.id], &[flag.clone()], op);
 
     match result {
         Ok(()) if add => {
@@ -784,17 +777,8 @@ fn do_send(model: &mut Model) {
         }
     };
 
-    let (from, to) = match extract_envelope(&mime_bytes) {
-        Ok(env) => env,
-        Err(e) => {
-            set_status(model, format!("Send error: {e}"));
-            return;
-        }
-    };
-    let to_refs: Vec<&str> = to.iter().map(String::as_str).collect();
-
     set_status(model, "Sending message…");
-    let result = model.client.send_message(mime_bytes, &from, &to_refs);
+    let result = model.client.send_message(mime_bytes);
     match result {
         Ok(()) => {
             set_status(model, "Message sent");
@@ -867,71 +851,4 @@ pub fn decode_message_body(raw: &[u8]) -> Result<String> {
     } else {
         Ok(String::from_utf8_lossy(raw).to_string())
     }
-}
-
-/// Extracts the SMTP envelope sender and recipients from the raw RFC
-/// 5322 headers (From, To, Cc, Bcc).
-fn extract_envelope(raw: &[u8]) -> Result<(String, Vec<String>)> {
-    let Some(msg) = MessageParser::new().parse_headers(raw) else {
-        bail!("Invalid message to send")
-    };
-
-    let mut mail_from: Option<String> = None;
-    let mut rcpt_to: HashSet<String> = HashSet::new();
-
-    for header in msg.headers() {
-        let key = &header.name;
-        let val = header.value();
-
-        match key {
-            HeaderName::From => {
-                if let HeaderValue::Address(Address::List(addrs)) = val {
-                    if let Some(email) = addrs.first().and_then(valid_email) {
-                        mail_from = Some(email);
-                    }
-                } else if let HeaderValue::Address(Address::Group(groups)) = val {
-                    if let Some(group) = groups.first() {
-                        if let Some(email) = group.addresses.first().and_then(valid_email) {
-                            mail_from = Some(email);
-                        }
-                    }
-                }
-            }
-            HeaderName::To | HeaderName::Cc | HeaderName::Bcc => match val {
-                HeaderValue::Address(Address::List(addrs)) => {
-                    rcpt_to.extend(addrs.iter().filter_map(valid_email));
-                }
-                HeaderValue::Address(Address::Group(groups)) => {
-                    rcpt_to.extend(
-                        groups
-                            .iter()
-                            .flat_map(|group| group.addresses.iter())
-                            .filter_map(valid_email),
-                    );
-                }
-                _ => (),
-            },
-            _ => (),
-        };
-    }
-
-    let Some(mail_from) = mail_from else {
-        bail!("The message does not contain any sender")
-    };
-    if rcpt_to.is_empty() {
-        bail!("The message does not contain any recipient");
-    }
-
-    Ok((mail_from, rcpt_to.into_iter().collect()))
-}
-
-fn valid_email(addr: &Addr) -> Option<String> {
-    addr.address.as_ref().and_then(|email| {
-        let email = email.trim();
-        if email.is_empty() {
-            None
-        } else {
-            Some(email.to_string())
-        }
-    })
 }
