@@ -19,6 +19,8 @@
 //! the [`Message`] enum naming each transition. Mutation happens in
 //! [`crate::tui::update`]; rendering in [`crate::tui::view`].
 
+use std::time::{Duration, Instant};
+
 use clap::ValueEnum;
 use edtui::{EditorEventHandler, EditorState};
 use io_email::{
@@ -37,6 +39,12 @@ use crate::tui::theme::Theme;
 /// list block. Both the view (frame sizing) and the update layer
 /// (selection clamping) depend on this constant.
 pub const MAILBOX_DIALOG_VISIBLE: usize = 10;
+
+/// Minimum idle period after which the app issues a NOOP to every
+/// registered network backend. Tuned below the tightest common SMTP
+/// submission timeout (~120 s behind corporate NAT / cloud firewalls)
+/// so connections stay warm during long reading sessions.
+pub const PING_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Model {
     pub running: bool,
@@ -70,6 +78,10 @@ pub struct Model {
     pub keybinds: Option<Keybinds>,
     pub theme: Theme,
     pub client: EmailClientStd,
+    /// Timestamp of the last successful network round-trip (any user
+    /// action or NOOP). The app loop dispatches [`Message::Ping`] once
+    /// the elapsed time crosses [`PING_INTERVAL`].
+    pub last_activity: Instant,
 }
 
 impl Model {
@@ -308,6 +320,8 @@ pub enum Message {
     DialogPrevious,
     DialogConfirm,
     DialogClose,
+
+    Ping,
 
     LoadMailboxes,
     LoadEnvelopes,

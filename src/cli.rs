@@ -19,7 +19,7 @@
 //! turns parsed flags + on-disk config (or the wizard) into a ready-to-run
 //! [`Model`], applying CLI overrides last.
 
-use std::{env::temp_dir, fs::File, path::PathBuf};
+use std::{env::temp_dir, fs::File, path::PathBuf, time::Instant};
 
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -227,6 +227,7 @@ impl Cli {
             keybinds,
             theme,
             client,
+            last_activity: Instant::now(),
         };
 
         if let Some(from) = self.from {

@@ -21,6 +21,8 @@
 //! All I/O goes through `model.client`; the model is the sole owner
 //! of both UI state and the email client.
 
+use std::time::Instant;
+
 use anyhow::{Result, bail};
 use edtui::{
     EditorMode, EditorState, Index2, Lines,
@@ -61,6 +63,14 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             None
         }
         Message::Initialize => Some(Message::LoadMailboxes),
+
+        Message::Ping => {
+            if let Err(err) = model.client.ping() {
+                log::warn!("Ping failed: {err}");
+            }
+            model.last_activity = Instant::now();
+            None
+        }
 
         Message::TogglePanel => {
             toggle_panel(model);

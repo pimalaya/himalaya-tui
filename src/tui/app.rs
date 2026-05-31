@@ -34,7 +34,7 @@ use ratatui::{
 };
 
 use crate::tui::{
-    model::{Message, Model, Panel},
+    model::{Message, Model, PING_INTERVAL, Panel},
     update, view,
 };
 
@@ -64,6 +64,11 @@ pub fn run(mut model: Model) -> Result<()> {
         terminal.draw(|f| view::render(&mut model, f))?;
 
         if !event::poll(POLL_TIMEOUT)? {
+            // Idle tick: keep network backends warm so the server
+            // does not drop the connection mid-session.
+            if model.last_activity.elapsed() >= PING_INTERVAL {
+                update::apply_all(&mut model, Some(Message::Ping));
+            }
             continue;
         }
 

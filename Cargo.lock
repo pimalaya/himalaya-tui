@@ -1411,7 +1411,7 @@ dependencies = [
 [[package]]
 name = "io-email"
 version = "0.0.1"
-source = "git+https://github.com/pimalaya/io-email#d525cdd4f23fdae3a80cd4315f32b00685032732"
+source = "git+https://github.com/pimalaya/io-email#7ad5d05e801319c264c3745991c1fbef6d59e77d"
 dependencies = [
  "chrono",
  "gethostname",

@@ -17,3 +17,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - SASL mechanisms: anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256.
 - Color themes: built-in presets (`default`, `dracula-dark`, `one-light`) plus per-field `[theme.*]` overrides in the TOML config (`fg`, `bg`, `mod`).
 - `himalaya-tui completions <shell>` and `himalaya-tui manuals <dir>` auxiliary subcommands.
+
+- Added a 60-second idle ping that issues a NOOP to every registered network backend (IMAP, SMTP) when the user is inactive, so long reading sessions do not lose their connections to server-side inactivity timeouts.
