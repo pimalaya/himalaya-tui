@@ -116,8 +116,8 @@ fn render_status_bar(frame: &mut Frame, model: &Model, area: Rect) {
     } else {
         let mailbox = model.selected_mailbox_name().unwrap_or("None");
         let mode_hint = match model.bottom_panel {
-            BottomPanel::None => "Enter: select",
-            BottomPanel::Message => "Esc: close",
+            BottomPanel::None => "Enter: select, Shift+l: re(L)oad",
+            BottomPanel::Message => "Esc: close, Shift+r: (R)eply, Shift+a: reply (A)ll",
             BottomPanel::MessagePreview => "Esc: back to compose",
             BottomPanel::Compose => "Esc: actions",
         };

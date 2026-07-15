@@ -255,6 +255,27 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         return Some(Message::StartCompose);
     }
 
+    // Additional key-bindings
+    if !in_mailbox_dialog {
+        // In mail list panel:
+        // - Shift+l = re(L)oad mail boxes
+        match model.bottom_panel {
+            BottomPanel::None => {
+                if key.code == KeyCode::Char('L') {
+                    return Some(Message::LoadMailboxes);
+                }
+            }
+            BottomPanel::Message => {
+                if key.code == KeyCode::Char('R') {
+                    return Some(Message::StartReplyToSelected { reply_all: false })
+                } else if key.code == KeyCode::Char('A') {
+                    return Some(Message::StartReplyToSelected { reply_all:  true })
+                }
+            }
+            _ => ()
+        }
+    }
+
     match code {
         KeyCode::Esc => Some(Message::Esc),
         KeyCode::Tab => Some(Message::TogglePanel),
