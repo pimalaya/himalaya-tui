@@ -1,8 +1,8 @@
 //! Terminal UI built on the Elm Architecture (Model-Update-View).
 //!
 //! - [`model`] owns every piece of state, including the
-//!   `EmailClientStd`, and defines the [`model::Message`] enum that
-//!   names each transition.
+//!   [`crate::shared::client::EmailClient`], and defines the [`model::Message`]
+//!   enum that names each transition.
 //! - [`update`] is a pure function from `(Model, Message)` to a new
 //!   `Model` plus an optional follow-up `Message`. All I/O lives
 //!   here; nothing else mutates state.

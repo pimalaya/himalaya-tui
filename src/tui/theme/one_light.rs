@@ -1,4 +1,4 @@
-//! Atom One Light — 24-bit RGB palette.
+//! Atom One Light 24-bit RGB palette.
 //! bg=#fafafa, line-bg=#e5e5e6, mono-1=#383a42, mono-3=#a0a1a7,
 //! cyan=#0184bc, blue=#4078f2, magenta=#a626a4, green=#50a14f,
 //! red=#e45649, orange=#c18401

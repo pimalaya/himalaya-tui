@@ -8,17 +8,12 @@ ignore = [
 ]
 
 [sources]
-allow-git = [
-  "https://github.com/pimalaya/pimconf",
-  "https://github.com/nlnetlabs/domain",
-]
 unknown-git = "deny"
 unknown-registry = "deny"
 
 [licenses]
 allow = [
   "0BSD",
-  "AGPL-3.0-only",
   "Apache-2.0 WITH LLVM-exception",
   "Apache-2.0",
   "BSD-3-Clause",

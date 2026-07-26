@@ -6,7 +6,7 @@
 //! 2. If the input is a `file://` URL: validate the Maildir root, ask
 //!    for the `From:` address, done.
 //! 3. If the input is another URL: scheme picks the protocol; host,
-//!    port and TLS come straight from the URL — no confirmation
+//!    port and TLS come straight from the URL, no confirmation
 //!    prompt.
 //! 4. If the input is a domain or email: probe PACC → (Autoconfig ISP
 //!    when an email was given) → Autoconfig ISP-fallback → Autoconfig
@@ -177,7 +177,7 @@ fn build_url_account(url: Url, from: Option<&str>) -> Result<AccountConfig> {
 
     match scheme.as_str() {
         // `imap[s]://` and `smtp[s]://` are just "I want IMAP+SMTP"
-        // hints — the URL's host is the discovery target, and both
+        // hints: the URL's host is the discovery target, and both
         // backends come from whatever pacc/autoconfig/srv returns.
         "imap" | "imaps" | "smtp" | "smtps" => {
             let domain = extract_discovery_domain(&host);

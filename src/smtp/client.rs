@@ -31,10 +31,17 @@ impl SmtpClient {
         let server = parse_smtp_server(&config.server)?;
         let sasl: Option<Sasl> = config
             .sasl
-            .and_then(|cfg| {
-                let host = server.host_str()?;
-                let port = server.port_or_known_default()?;
-                Some(cfg.try_into_sasl(host, port))
+            .map(|cfg| {
+                let host = server.host_str().unwrap_or_default();
+                // url does not know the smtp(s) default ports; gating on
+                // port_or_known_default() would silently drop the whole SASL
+                // config for a portless URL, opening an unauthenticated
+                // session.
+                let port =
+                    server
+                        .port()
+                        .unwrap_or(if server.scheme() == "smtps" { 465 } else { 25 });
+                cfg.try_into_sasl(host, port)
             })
             .transpose()?;
         let inner = Inner::connect(&server, &tls, config.starttls, domain, sasl)?;

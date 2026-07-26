@@ -2,7 +2,7 @@
 name = "himalaya-tui"
 description = "TUI to manage emails"
 version = "0.1.0"
-authors = ["soywod <pimalaya.org@posteo.net>"]
+authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
 rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -10,10 +10,6 @@ categories = ["command-line-utilities", "email"]
 keywords = ["tui", "email", "imap", "ratatui", "jmap"]
 homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/himalaya-tui"
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["rustls-ring", "imap", "smtp", "jmap", "maildir", "m2dir"]
@@ -38,12 +34,12 @@ pimalaya-cli = { version = "0.1", default-features = false, features = ["build"]
 
 [dependencies]
 anyhow = "1"
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true, default-features = false, features = ["alloc"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
-io-imap = { version = "0.2", default-features = false, optional = true }
+io-imap = { version = "0.3", default-features = false, optional = true }
 io-jmap = { version = "0.2", default-features = false, optional = true }
 io-m2dir = { version = "0.2", default-features = false, optional = true }
 io-maildir = { version = "0.2", default-features = false, optional = true }

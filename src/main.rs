@@ -1,6 +1,49 @@
-//! Binary entry point: parse CLI flags, run any auxiliary subcommand
-//! (completions, manuals), otherwise build the [`tui::model::Model`]
-//! from config or wizard and hand it to [`tui::app::run`].
+//! # himalaya-tui
+//!
+//! TUI to manage emails. himalaya-tui is an application, the top layer
+//! of the Pimalaya stack: it writes no protocol or storage logic of its
+//! own and ships no library target, only this binary. It is a thin
+//! shell driving the sans-I/O io-* libraries below it, consuming their
+//! blocking `*Std` clients and rendering the results in a terminal.
+//!
+//! ## Backends and plumbing
+//!
+//! The network backends are io-imap, io-jmap and io-smtp; the local
+//! storage backends are io-maildir and io-m2dir. Account discovery comes
+//! from io-pim-discovery (Mozilla autoconfig, PACC, RFC 6186 SRV). The
+//! terminal, prompt and wizard primitives, the TOML config loading and
+//! the blocking stream runtime come from pimalaya-cli, pimalaya-config
+//! and pimalaya-stream; message composition uses mml. Every backend sits
+//! behind its own cargo feature, so a build ships only the protocols it
+//! needs.
+//!
+//! ## Shared client and backend selection
+//!
+//! The TUI runs over a local [`shared::client`] `EmailClient` that owns
+//! one `BackendClient` enum variant per compiled-in backend: the first
+//! configured storage backend (local before network), plus an optional
+//! SMTP transport for storage backends that cannot send (IMAP, Maildir,
+//! m2dir). Each operation matches the active backend and calls its
+//! per-protocol `backend.rs` adapter, which converts io-* results into
+//! the TUI's own [`email`] shared types (Envelope, Mailbox, Flag,
+//! Address).
+//!
+//! ## Terminal interface
+//!
+//! The interface follows the Elm Architecture (see [`tui`]): [`tui::model`]
+//! owns all state and the `Message` enum, [`tui::update`] is the single
+//! side-effecting transition function, [`tui::view`] renders the
+//! three-pane layout (mailboxes, envelopes, message body or composer),
+//! and [`tui::app`] drives the poll/update/redraw loop. The in-app
+//! composer is powered by edtui with a system-editor handoff, and drafts
+//! are written in MML then compiled to MIME on send.
+//!
+//! ## Startup
+//!
+//! [`main`] parses the CLI flags, runs any auxiliary subcommand
+//! (completions, manuals), otherwise builds the [`tui::model::Model`]
+//! from the config file or the setup wizard and hands it to
+//! [`tui::app::run`].
 
 mod cli;
 mod config;

@@ -32,10 +32,17 @@ impl ImapClient {
         let server = parse_imap_server(&config.server)?;
         let sasl: Option<Sasl> = config
             .sasl
-            .and_then(|cfg| {
-                let host = server.host_str()?;
-                let port = server.port_or_known_default()?;
-                Some(cfg.try_into_sasl(host, port))
+            .map(|cfg| {
+                let host = server.host_str().unwrap_or_default();
+                // url does not know the imap(s) default ports; gating on
+                // port_or_known_default() would silently drop the whole SASL
+                // config for a portless URL, opening an unauthenticated
+                // session.
+                let port =
+                    server
+                        .port()
+                        .unwrap_or(if server.scheme() == "imaps" { 993 } else { 143 });
+                cfg.try_into_sasl(host, port)
             })
             .transpose()?;
         let auto_id = resolve_auto_id_params(&config.id)?;
