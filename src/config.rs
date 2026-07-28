@@ -38,6 +38,8 @@ use crate::tui::{
     theme::{self, Theme},
 };
 
+pub const DEFAULT_PALETTE_KEY: char = ':';
+
 /// `deny_unknown_fields` is intentionally omitted so the same TOML
 /// file can be shared with the `himalaya` CLI: top-level CLI-only
 /// sections (`table`, `envelope`, `mailbox`, `message`, `attachment`,
@@ -53,6 +55,9 @@ pub struct Config {
     /// Composer keybinding flavor (Vim or Emacs). The CLI `--keybinds`
     /// flag overrides this; both default to Vim when omitted.
     pub keybinds: Option<Keybinds>,
+    /// Key that opens the command palette;
+    /// [`DEFAULT_PALETTE_KEY`] when omitted.
+    pub palette_key: Option<char>,
     /// Color theme: pick a preset (`dracula`, `one-dark`, …) and/or
     /// override individual fields. Resolved into a [`Theme`] at
     /// startup.
@@ -580,5 +585,42 @@ impl SaslConfig {
                 password: c.password.get()?,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(body: &str) -> Result<Config, toml::de::Error> {
+        toml::from_str(&format!("{body}\n[accounts]\n"))
+    }
+
+    #[test]
+    fn palette_key_parses_single_character() {
+        let config = parse(r#"palette-key = ";""#).unwrap();
+        assert_eq!(config.palette_key, Some(';'));
+    }
+
+    #[test]
+    fn palette_key_defaults_to_colon_when_omitted() {
+        let config = parse("").unwrap();
+        assert_eq!(config.palette_key, None);
+        assert_eq!(DEFAULT_PALETTE_KEY, ':');
+    }
+
+    #[test]
+    fn palette_key_rejects_multi_character_values() {
+        let parsed = parse(r#"palette-key = "abc""#);
+        assert!(
+            parsed.is_err(),
+            "multi-character palette-key must not parse"
+        );
+    }
+
+    #[test]
+    fn palette_key_coexists_with_cli_only_fields() {
+        let config = parse("palette-key = \":\"\n\n[table]\nmax-width = 10\n").unwrap();
+        assert_eq!(config.palette_key, Some(':'));
     }
 }

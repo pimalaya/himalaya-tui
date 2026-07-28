@@ -5,7 +5,8 @@
 //!   names each transition.
 //! - [`update`] is a pure function from `(Model, Message)` to a new
 //!   `Model` plus an optional follow-up `Message`. All I/O lives
-//!   here; nothing else mutates state.
+//!   here; nothing else mutates state except delegated sub-updates
+//!   ([`palette::update`], reached through one `Message::Palette` arm).
 //! - [`view`] renders the current `Model` to a ratatui [`Frame`]; it
 //!   never produces messages or mutates anything user-visible.
 //! - [`app`] drives the loop: poll events, fold the resulting message
@@ -24,7 +25,9 @@
 //! [`Frame`]: ratatui::Frame
 
 pub mod app;
+pub mod command;
 pub mod model;
+pub mod palette;
 pub mod theme;
 pub mod update;
 pub mod view;

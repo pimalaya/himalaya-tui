@@ -147,11 +147,29 @@ Top-level navigation, supporting Vim and Emacs keybinds:
 | `Tab` | Cycle panel |
 | `↓`, `j`, `Ctrl-n` | Next item |
 | `↑`, `k`, `Ctrl-p` | Previous item |
-| `PageDown`, `Ctrl-d`, `Ctrl-v` | Next page |
-| `PageUp`, `Ctrl-u`, `Alt-v` | Previous page |
+| `PageDown` (vim: `Ctrl-d`, emacs: `Ctrl-v`) | Next page |
+| `PageUp` (vim: `Ctrl-u`, emacs: `Alt-v`) | Previous page |
 | `Enter` | Select |
 | `Esc`, `q`, `Ctrl-g` | Close panel / dialog / quit |
+| `:` | Open the command palette (configurable via `palette-key`) |
+
+Command keys, active whenever the command itself is (e.g. envelope keys need a
+selected envelope; they are inert inside dialogs, the palette and the
+composer):
+
+| Keybind | Command |
+|---|---|
+| `o` | Read the selected envelope |
+| `r`, `R` | Reply / Reply All |
+| `f` | Forward |
+| `c`, `m` | Copy / Move to another mailbox |
+| `+`, `-` | Add / Remove flag |
 | `Ctrl-c` | Start a new draft |
+| `F5` | Reload mailboxes |
+
+The command palette (`:`) lists every command with fuzzy search and its
+current keybind; `Enter` on an envelope still opens the same actions as a
+menu.
 
 Composer:
 
@@ -160,7 +178,7 @@ Composer:
 | `Ctrl-e`, `Alt-e` | Hand off to `$VISUAL` or `$EDITOR` for the current draft |
 | `Esc` | Open the compose actions dialog (Send, Preview, Save to Drafts, Cancel) |
 
-The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) changes the in-app composer's edtui keybinds. In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
+The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) selects the keybinding flavor: the in-app composer's edtui keybinds and the flavor-scoped command keys (paging, above). In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
 
 Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag.
 

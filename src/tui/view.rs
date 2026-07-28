@@ -21,10 +21,9 @@ use crate::{
         flag::{Flag, IanaFlag},
     },
     tui::{
-        model::{
-            BottomPanel, ComposeAction, Dialog, EnvelopeAction, FlagAction, Keybinds,
-            MAILBOX_DIALOG_VISIBLE, Model, Panel,
-        },
+        command,
+        model::{BottomPanel, Dialog, FlagAction, Keybinds, MAILBOX_DIALOG_VISIBLE, Model, Panel},
+        palette,
         theme::Theme,
     },
 };
@@ -45,6 +44,7 @@ pub fn render(model: &mut Model, frame: &mut Frame) {
     render_main(frame, model, chunks[1]);
     render_status_bar(frame, model, chunks[2]);
     render_dialog_overlay(frame, model);
+    palette::view::render(frame, model);
 }
 
 fn render_main(frame: &mut Frame, model: &mut Model, area: Rect) {
@@ -349,7 +349,7 @@ fn render_message(frame: &mut Frame, model: &Model, area: Rect) {
 fn render_compose(frame: &mut Frame, model: &mut Model, area: Rect) {
     // Emacs binds `Ctrl-e` to "move to end of line", so only Vim
     // exposes it as the system-editor shortcut (alongside `Alt-e`).
-    let editor_hint = match model.keybinds.unwrap_or_default() {
+    let editor_hint = match model.keybinds {
         Keybinds::Vim => "Ctrl-e or Alt-e: open in $EDITOR",
         Keybinds::Emacs => "Alt-e: open in $EDITOR",
     };
@@ -376,90 +376,56 @@ fn render_compose(frame: &mut Frame, model: &mut Model, area: Rect) {
 }
 
 fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
-    let theme = model.theme;
     match model.dialog {
-        Some(Dialog::Envelope) => render_dialog(
-            frame,
-            &theme,
-            model.dialog_index,
-            " Actions ",
-            &EnvelopeAction::ALL.map(|a| a.label()),
-        ),
-        Some(Dialog::Compose) => render_dialog(
-            frame,
-            &theme,
-            model.dialog_index,
-            " Compose ",
-            &ComposeAction::ALL.map(|a| a.label()),
-        ),
+        Some(dialog @ (Dialog::Envelope | Dialog::Compose)) => {
+            render_command_dialog(frame, model, dialog)
+        }
         Some(Dialog::CopyTo) => render_mailbox_dialog(frame, model, " Copy to "),
         Some(Dialog::MoveTo) => render_mailbox_dialog(frame, model, " Move to "),
-        Some(Dialog::FlagAdd) => render_dialog(
-            frame,
-            &theme,
-            model.dialog_index,
-            " Add Flag ",
-            &FlagAction::ALL.map(|a| a.label()),
-        ),
-        Some(Dialog::FlagRemove) => render_dialog(
-            frame,
-            &theme,
-            model.dialog_index,
-            " Remove Flag ",
-            &FlagAction::ALL.map(|a| a.label()),
-        ),
+        Some(dialog @ (Dialog::FlagAdd | Dialog::FlagRemove)) => {
+            let title = if dialog == Dialog::FlagAdd {
+                " Add Flag "
+            } else {
+                " Remove Flag "
+            };
+            render_dialog(
+                frame,
+                &model.theme,
+                model.dialog_index,
+                title,
+                &FlagAction::ALL.map(|a| (a.label(), String::new())),
+            );
+        }
         None => {}
     }
+}
+
+fn render_command_dialog(frame: &mut Frame, model: &Model, dialog: Dialog) {
+    let Some(context) = dialog.command_context() else {
+        return;
+    };
+    let title = if dialog == Dialog::Envelope {
+        " Actions "
+    } else {
+        " Compose "
+    };
+    let rows: Vec<(&str, String)> = command::for_context(context)
+        .map(|c| (c.name, c.hint(model.keybinds).unwrap_or_default()))
+        .collect();
+    render_dialog(frame, &model.theme, model.dialog_index, title, &rows);
 }
 
 /// Two centered stacked frames: top has the title + a `> ` prompt
 /// and the filter input; bottom is an untitled, fixed-height results
 /// frame so the dialog size does not jump as the filter narrows.
 fn render_mailbox_dialog(frame: &mut Frame, model: &Model, title: &str) {
-    const INPUT_BOX_HEIGHT: u16 = 3;
-    const PROMPT: &str = "> ";
-
-    let list_box_height = MAILBOX_DIALOG_VISIBLE as u16 + 2;
-
-    let total_height = INPUT_BOX_HEIGHT + list_box_height;
-    let area = centered_rect_fixed_height(40, total_height, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(INPUT_BOX_HEIGHT),
-            Constraint::Length(list_box_height),
-        ])
-        .split(area);
-
-    let input_area = chunks[0];
-    let list_area = chunks[1];
-
-    let input_block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(model.theme.dialog_border);
-    let input_inner = input_block.inner(input_area);
-    frame.render_widget(input_block, input_area);
-
-    let filter_value = model.mailbox_filter.value();
-    frame.render_widget(
-        Paragraph::new(format!("{PROMPT}{filter_value}")),
-        input_inner,
+    let list_inner = render_filter_overlay(
+        frame,
+        &model.theme,
+        title,
+        &model.mailbox_filter,
+        MAILBOX_DIALOG_VISIBLE,
     );
-
-    let cursor_col = input_inner.x
-        + (PROMPT.len() as u16 + model.mailbox_filter.visual_cursor() as u16)
-            .min(input_inner.width.saturating_sub(1));
-    frame.set_cursor_position((cursor_col, input_inner.y));
-
-    let list_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(model.theme.dialog_border);
-    let list_inner = list_block.inner(list_area);
-    frame.render_widget(list_block, list_area);
 
     let items: Vec<ListItem> = model
         .filtered_mailboxes()
@@ -478,14 +444,70 @@ fn render_mailbox_dialog(frame: &mut Frame, model: &Model, title: &str) {
     frame.render_widget(List::new(items), list_inner);
 }
 
+/// Centered filter-picker chrome shared by the mailbox picker and the
+/// command palette: a titled input frame with a `> ` prompt and live
+/// cursor, stacked on a fixed-height untitled result frame (fixed so
+/// the overlay does not resize as the filter narrows). Returns the
+/// result frame's inner area for the caller to fill.
+pub(crate) fn render_filter_overlay(
+    frame: &mut Frame,
+    theme: &Theme,
+    title: &str,
+    filter: &tui_input::Input,
+    visible_rows: usize,
+) -> Rect {
+    const INPUT_BOX_HEIGHT: u16 = 3;
+    const PROMPT: &str = "> ";
+    const WIDTH_PERCENT: u16 = 40;
+
+    let list_box_height = visible_rows as u16 + 2;
+    let total_height = INPUT_BOX_HEIGHT + list_box_height;
+    let area = centered_rect_fixed_height(WIDTH_PERCENT, total_height, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(INPUT_BOX_HEIGHT),
+            Constraint::Length(list_box_height),
+        ])
+        .split(area);
+
+    let input_block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(theme.dialog_border);
+    let input_inner = input_block.inner(chunks[0]);
+    frame.render_widget(input_block, chunks[0]);
+
+    frame.render_widget(
+        Paragraph::new(format!("{PROMPT}{}", filter.value())),
+        input_inner,
+    );
+
+    let cursor_col = input_inner.x
+        + (PROMPT.len() as u16 + filter.visual_cursor() as u16)
+            .min(input_inner.width.saturating_sub(1));
+    frame.set_cursor_position((cursor_col, input_inner.y));
+
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.dialog_border);
+    let list_inner = list_block.inner(chunks[1]);
+    frame.render_widget(list_block, chunks[1]);
+
+    list_inner
+}
+
 fn render_dialog(
     frame: &mut Frame,
     theme: &Theme,
     selected_index: usize,
     title: &str,
-    labels: &[&str],
+    rows: &[(&str, String)],
 ) {
-    let height = (labels.len() as u16 + 2).min(20);
+    let height = (rows.len() as u16 + 2).min(20);
     let area = centered_rect_fixed_height(40, height, frame.area());
 
     frame.render_widget(Clear, area);
@@ -498,27 +520,32 @@ fn render_dialog(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let items: Vec<ListItem> = labels
+    let items: Vec<ListItem> = rows
         .iter()
         .enumerate()
-        .map(|(i, label)| {
+        .map(|(i, (label, hint))| {
             let style = if i == selected_index {
                 theme.cursor
             } else {
                 theme.message_body
             };
 
-            let prefix = if i == selected_index { "> " } else { "  " };
+            let text = aligned_row(label, hint, i == selected_index, inner.width);
 
-            ListItem::new(Line::from(Span::styled(
-                format!("{}{}", prefix, label),
-                style,
-            )))
+            ListItem::new(Line::from(Span::styled(text, style)))
         })
         .collect();
 
     let list = List::new(items);
     frame.render_widget(list, inner);
+}
+
+/// One picker/menu row: selection prefix + `label`, with `hint`
+/// right-aligned to `width`.
+pub(crate) fn aligned_row(label: &str, hint: &str, is_selected: bool, width: u16) -> String {
+    let prefix = if is_selected { "> " } else { "  " };
+    let label_width = (width as usize).saturating_sub(prefix.len() + hint.len());
+    format!("{prefix}{label:<label_width$}{hint}")
 }
 
 fn centered_rect_fixed_height(percent_x: u16, height: u16, r: Rect) -> Rect {

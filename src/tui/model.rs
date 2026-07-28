@@ -17,7 +17,11 @@ use crate::{
         mailbox::Mailbox,
     },
     shared::client::EmailClient,
-    tui::theme::Theme,
+    tui::{
+        command::{self, CommandContext},
+        palette::{PaletteMessage, PaletteState},
+        theme::Theme,
+    },
 };
 
 /// Number of mailbox rows visible inside the CopyTo/MoveTo dialog
@@ -30,6 +34,8 @@ pub const MAILBOX_DIALOG_VISIBLE: usize = 10;
 /// submission timeout (~120 s behind corporate NAT / cloud firewalls)
 /// so connections stay warm during long reading sessions.
 pub const PING_INTERVAL: Duration = Duration::from_secs(60);
+
+pub const DEFAULT_ENVELOPE_PAGE_SIZE: usize = 50;
 
 pub struct Model {
     pub running: bool,
@@ -57,10 +63,13 @@ pub struct Model {
     pub editor_handler: EditorEventHandler,
     pub dialog: Option<Dialog>,
     pub dialog_index: usize,
-    /// Composer flavor. Affects only the in-composer edtui handler;
-    /// top-level navigation always recognises both Vim and Emacs
-    /// aliases. `None` falls back to Vim.
-    pub keybinds: Option<Keybinds>,
+    pub palette: Option<PaletteState>,
+    /// Keybinding flavor: selects the in-composer edtui handler and
+    /// which flavor-scoped command keys are active. Resolved from
+    /// CLI/config at startup; list-navigation aliases stay
+    /// flavor-neutral.
+    pub keybinds: Keybinds,
+    pub palette_key: char,
     pub theme: Theme,
     pub client: EmailClient,
     /// Timestamp of the last successful network round-trip (any user
@@ -101,12 +110,13 @@ impl Model {
     }
 
     pub fn dialog_item_count(&self) -> usize {
-        match self.dialog {
-            Some(Dialog::Envelope) => EnvelopeAction::ALL.len(),
-            Some(Dialog::Compose) => ComposeAction::ALL.len(),
-            Some(Dialog::CopyTo) | Some(Dialog::MoveTo) => self.filtered_mailboxes().len(),
-            Some(Dialog::FlagAdd) | Some(Dialog::FlagRemove) => FlagAction::ALL.len(),
-            None => 0,
+        let Some(dialog) = self.dialog else { return 0 };
+        if let Some(context) = dialog.command_context() {
+            return command::for_context(context).count();
+        }
+        match dialog {
+            Dialog::CopyTo | Dialog::MoveTo => self.filtered_mailboxes().len(),
+            _ => FlagAction::ALL.len(),
         }
     }
 
@@ -122,16 +132,56 @@ impl Model {
         self.editor_state.lines.to_string()
     }
 
-    pub fn selected_envelope_action(&self) -> EnvelopeAction {
-        EnvelopeAction::ALL[self.dialog_index]
-    }
-
-    pub fn selected_compose_action(&self) -> ComposeAction {
-        ComposeAction::ALL[self.dialog_index]
-    }
-
     pub fn selected_flag_action(&self) -> FlagAction {
         FlagAction::ALL[self.dialog_index]
+    }
+}
+
+impl Model {
+    /// A blank, running model over the given client; callers layer
+    /// their own fields on via struct-update syntax.
+    pub fn new(client: EmailClient) -> Self {
+        Self {
+            client,
+            running: true,
+            active_panel: Panel::Mailboxes,
+            mailboxes: Vec::new(),
+            mailbox_index: 0,
+            mailbox_offset: 0,
+            mailbox_filter: Input::default(),
+            envelopes: Vec::new(),
+            envelope_index: 0,
+            envelope_offset: 0,
+            envelope_page: 0,
+            envelope_page_size: DEFAULT_ENVELOPE_PAGE_SIZE,
+            envelope_total: 0,
+            selected_mailbox: None,
+            account_name: String::new(),
+            from: None,
+            from_name: None,
+            signature: String::new(),
+            status_message: None,
+            bottom_panel: BottomPanel::None,
+            message_content: None,
+            message_scroll: 0,
+            editor_state: EditorState::default(),
+            editor_handler: Keybinds::default().editor_handler(),
+            dialog: None,
+            dialog_index: 0,
+            palette: None,
+            keybinds: Keybinds::default(),
+            palette_key: crate::config::DEFAULT_PALETTE_KEY,
+            theme: Theme::default(),
+            last_activity: Instant::now(),
+        }
+    }
+}
+
+/// Backend-less model for tests; the client can never perform I/O.
+#[cfg(test)]
+impl Default for Model {
+    fn default() -> Self {
+        Self::new(EmailClient::default())
     }
 }
 
@@ -166,66 +216,14 @@ pub enum Dialog {
     FlagRemove,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnvelopeAction {
-    Read,
-    Reply,
-    ReplyAll,
-    Forward,
-    Copy,
-    Move,
-    AddFlag,
-    RemoveFlag,
-}
-
-impl EnvelopeAction {
-    pub const ALL: [EnvelopeAction; 8] = [
-        EnvelopeAction::Read,
-        EnvelopeAction::Reply,
-        EnvelopeAction::ReplyAll,
-        EnvelopeAction::Forward,
-        EnvelopeAction::Copy,
-        EnvelopeAction::Move,
-        EnvelopeAction::AddFlag,
-        EnvelopeAction::RemoveFlag,
-    ];
-
-    pub fn label(&self) -> &'static str {
+impl Dialog {
+    /// The registry context backing this dialog's rows; `None` for
+    /// the parameter pickers (mailbox and flag dialogs).
+    pub fn command_context(self) -> Option<CommandContext> {
         match self {
-            EnvelopeAction::Read => "Read",
-            EnvelopeAction::Reply => "Reply",
-            EnvelopeAction::ReplyAll => "Reply All",
-            EnvelopeAction::Forward => "Forward",
-            EnvelopeAction::Copy => "Copy",
-            EnvelopeAction::Move => "Move",
-            EnvelopeAction::AddFlag => "Add flag",
-            EnvelopeAction::RemoveFlag => "Remove flag",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComposeAction {
-    Send,
-    Preview,
-    SaveToDrafts,
-    Cancel,
-}
-
-impl ComposeAction {
-    pub const ALL: [ComposeAction; 4] = [
-        ComposeAction::Send,
-        ComposeAction::Preview,
-        ComposeAction::SaveToDrafts,
-        ComposeAction::Cancel,
-    ];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            ComposeAction::Send => "Send",
-            ComposeAction::Preview => "Preview",
-            ComposeAction::SaveToDrafts => "Save to Drafts",
-            ComposeAction::Cancel => "Cancel",
+            Dialog::Envelope => Some(CommandContext::Envelope),
+            Dialog::Compose => Some(CommandContext::Composer),
+            Dialog::CopyTo | Dialog::MoveTo | Dialog::FlagAdd | Dialog::FlagRemove => None,
         }
     }
 }
@@ -301,6 +299,9 @@ pub enum Message {
 
     MailboxFilterKey(KeyEvent),
 
+    Palette(PaletteMessage),
+
+    OpenDialog(Dialog),
     DialogNext,
     DialogPrevious,
     DialogConfirm,

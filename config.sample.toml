@@ -39,11 +39,16 @@
 # Default download directory for attachments. Falls back to `$TMPDIR`.
 #downloads-dir = "~/downloads"
 
-# Composer keybinding flavor: `vim` (default) or `emacs`. The `--keybinds` CLI
-# flag overrides this. The flavor drives both edtui's built-in bindings and
-# the event loop's own intercepts (notably `Ctrl-e`, which collides with
-# Emacs' "move to end of line").
+# Keybinding flavor: `vim` (default) or `emacs`. The `--keybinds` CLI flag
+# overrides this. The flavor drives the composer's edtui bindings (notably
+# `Ctrl-e`, which collides with Emacs' "move to end of line") and which
+# flavor-scoped command keys are active (e.g. paging via `Ctrl-d`/`Ctrl-u`
+# under vim, `Ctrl-v`/`Alt-v` under emacs).
 #keybinds = "vim"
+
+# Key that opens the command palette (a searchable list of every action).
+# A single character; pressed outside the composer and any open dialog.
+#palette-key = ":"
 
 # --------------------------------------------------------------------------------
 # Theme

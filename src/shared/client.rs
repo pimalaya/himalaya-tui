@@ -29,7 +29,9 @@ use crate::{
     },
 };
 
-/// Cross-protocol email client backing the interface.
+/// Cross-protocol email client backing the interface. The test-only
+/// `Default` client has no backend at all and can never perform I/O.
+#[cfg_attr(test, derive(Default))]
 pub struct EmailClient {
     storage: Option<BackendClient>,
     #[cfg(feature = "smtp")]

@@ -2,13 +2,12 @@
 //! turns parsed flags + on-disk config (or the wizard) into a ready-to-run
 //! [`Model`], applying CLI overrides last.
 
-use std::{env::temp_dir, fs::File, path::PathBuf, time::Instant};
+use std::{env::temp_dir, fs::File, path::PathBuf};
 
 use anyhow::Result;
 #[cfg(not(all(feature = "imap", feature = "smtp", feature = "jmap")))]
 use anyhow::bail;
 use clap::{CommandFactory, Parser, Subcommand};
-use edtui::{EditorState, Lines};
 use pimalaya_cli::{
     clap::{
         args::{JsonFlag, LogFlags},
@@ -21,15 +20,14 @@ use pimalaya_cli::{
 };
 use pimalaya_config::toml::TomlConfig;
 use simplelog::WriteLogger;
-use tui_input::Input;
 
 #[cfg(all(feature = "imap", feature = "smtp", feature = "jmap"))]
 use crate::wizard;
 use crate::{
-    config::{AccountConfig, Config},
+    config::{AccountConfig, Config, DEFAULT_PALETTE_KEY},
     shared::client::EmailClient,
     tui::{
-        model::{BottomPanel, Keybinds, Message, Model, Panel},
+        model::{Keybinds, Message, Model},
         theme::Theme,
         update,
     },
@@ -114,6 +112,7 @@ impl Cli {
         let mut display_name = None;
         let mut signature = String::new();
         let mut keybinds_config = None;
+        let mut palette_key = DEFAULT_PALETTE_KEY;
         let mut theme = Theme::default();
 
         let mut account = None;
@@ -121,6 +120,7 @@ impl Cli {
             display_name = config.display_name.take();
             signature = config.signature.take().unwrap_or_default();
             keybinds_config = config.keybinds.take();
+            palette_key = config.palette_key.take().unwrap_or(DEFAULT_PALETTE_KEY);
             theme = Theme::resolve(&config.theme);
             if let Some((name, cfg)) = config.take_account(self.account_or_server.as_deref())? {
                 account_name = name;
@@ -145,40 +145,20 @@ impl Cli {
         let from = account_config.from.clone();
         let from_name = account_config.from_name.take().or(display_name);
         let signature = account_config.signature.take().unwrap_or(signature);
-        let keybinds = self.keybinds.or(keybinds_config);
+        let keybinds = self.keybinds.or(keybinds_config).unwrap_or_default();
 
         let client = EmailClient::new(account_config)?;
 
         let mut model = Model {
-            running: true,
-            active_panel: Panel::Mailboxes,
-            mailboxes: Vec::new(),
-            mailbox_index: 0,
-            mailbox_offset: 0,
-            mailbox_filter: Input::default(),
-            envelopes: Vec::new(),
-            envelope_index: 0,
-            envelope_offset: 0,
-            envelope_page: 0,
-            envelope_page_size: 50,
-            envelope_total: 0,
-            selected_mailbox: None,
             account_name,
             from,
             from_name,
             signature,
-            status_message: None,
-            bottom_panel: BottomPanel::None,
-            message_content: None,
-            message_scroll: 0,
-            editor_state: EditorState::new(Lines::from("")),
-            editor_handler: keybinds.unwrap_or_default().editor_handler(),
-            dialog: None,
-            dialog_index: 0,
+            editor_handler: keybinds.editor_handler(),
             keybinds,
+            palette_key,
             theme,
-            client,
-            last_activity: Instant::now(),
+            ..Model::new(client)
         };
 
         if let Some(from) = self.from {

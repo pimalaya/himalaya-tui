@@ -75,3 +75,21 @@ pub fn normalize_message_id(raw: &str) -> Option<String> {
         Some(inner.to_string())
     }
 }
+
+#[cfg(test)]
+impl Envelope {
+    /// Minimal valid envelope fixture.
+    pub(crate) fn stub() -> Self {
+        Self {
+            id: "1".into(),
+            message_id: None,
+            flags: std::collections::BTreeSet::new(),
+            subject: String::new(),
+            from: Vec::new(),
+            to: Vec::new(),
+            date: None,
+            size: 0,
+            has_attachment: None,
+        }
+    }
+}

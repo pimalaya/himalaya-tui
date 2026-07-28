@@ -27,9 +27,10 @@ use crate::{
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
-    tui::model::{
-        BottomPanel, ComposeAction, Dialog, EnvelopeAction, FlagAction, MAILBOX_DIALOG_VISIBLE,
-        Message, Model, Panel,
+    tui::{
+        command::{self, Command, KeyBinding},
+        model::{BottomPanel, Dialog, FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel},
+        palette::{self, PaletteMessage},
     },
 };
 
@@ -69,20 +70,10 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             previous_item(model);
             None
         }
-        Message::PageDown => {
-            if model.active_panel == Panel::Envelopes && next_envelope_page(model) {
-                Some(Message::LoadEnvelopes)
-            } else {
-                None
-            }
-        }
-        Message::PageUp => {
-            if model.active_panel == Panel::Envelopes && prev_envelope_page(model) {
-                Some(Message::LoadEnvelopes)
-            } else {
-                None
-            }
-        }
+        // Panel gating happens at dispatch: every producer of the
+        // paging messages goes through the registry's `is_available`.
+        Message::PageDown => next_envelope_page(model).then_some(Message::LoadEnvelopes),
+        Message::PageUp => prev_envelope_page(model).then_some(Message::LoadEnvelopes),
         Message::Enter => match model.active_panel {
             Panel::Mailboxes => {
                 select_mailbox(model);
@@ -122,6 +113,12 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             None
         }
 
+        Message::Palette(palette_msg) => palette::update(model, palette_msg),
+
+        Message::OpenDialog(dialog) => {
+            open_dialog(model, dialog);
+            None
+        }
         Message::DialogNext => {
             dialog_next(model);
             None
@@ -185,6 +182,10 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
 }
 
 fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
+    if model.palette.is_some() {
+        return Some(Message::Palette(palette::translate_key(key)));
+    }
+
     // Composer owns its keys; only Esc and Alt-e are intercepted. Esc
     // reuses Message::Esc so apply() can dispatch by model state
     // (composer-mode Esc opens the compose dialog instead of quitting).
@@ -201,25 +202,8 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
     let in_mailbox_dialog = matches!(model.dialog, Some(Dialog::CopyTo | Dialog::MoveTo));
 
     let translated = match key.modifiers {
-        KeyModifiers::NONE if !in_mailbox_dialog => match key.code {
-            KeyCode::Char('j') | KeyCode::Char('n') => Some(KeyCode::Down),
-            KeyCode::Char('k') | KeyCode::Char('p') => Some(KeyCode::Up),
-            KeyCode::Char('q') => Some(KeyCode::Esc),
-            _ => None,
-        },
-        KeyModifiers::CONTROL => match key.code {
-            KeyCode::Char('n') => Some(KeyCode::Down),
-            KeyCode::Char('p') => Some(KeyCode::Up),
-            KeyCode::Char('v') => Some(KeyCode::PageDown),
-            KeyCode::Char('d') => Some(KeyCode::PageDown),
-            KeyCode::Char('u') => Some(KeyCode::PageUp),
-            KeyCode::Char('g') => Some(KeyCode::Esc),
-            _ => None,
-        },
-        KeyModifiers::ALT => match key.code {
-            KeyCode::Char('v') => Some(KeyCode::PageUp),
-            _ => None,
-        },
+        KeyModifiers::NONE if !in_mailbox_dialog => lookup_alias(PLAIN_ALIASES, key.code),
+        KeyModifiers::CONTROL => lookup_alias(CTRL_ALIASES, key.code),
         _ => None,
     };
 
@@ -236,8 +220,13 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         };
     }
 
-    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        return Some(Message::StartCompose);
+    let palette_binding = KeyBinding {
+        flavor: None,
+        code: KeyCode::Char(model.palette_key),
+        modifiers: KeyModifiers::NONE,
+    };
+    if palette_binding.matches(key, model.keybinds) {
+        return Some(Message::Palette(PaletteMessage::Open));
     }
 
     match code {
@@ -245,15 +234,40 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         KeyCode::Tab => Some(Message::TogglePanel),
         KeyCode::Down => Some(Message::Next),
         KeyCode::Up => Some(Message::Previous),
-        KeyCode::PageDown => Some(Message::PageDown),
-        KeyCode::PageUp => Some(Message::PageUp),
         KeyCode::Enter => Some(Message::Enter),
-        _ => None,
+        _ => command::bound(model, key).map(Command::dispatch),
     }
 }
 
-fn mailbox_filter_input(model: &mut Model, key: KeyEvent) {
-    let req = match (key.code, key.modifiers) {
+/// Flavor-neutral navigation aliases, translated ahead of dispatch.
+/// The reserved-key test in `command/tests.rs` reads these same
+/// tables, so registry bindings can never shadow an alias unnoticed.
+pub(crate) const PLAIN_ALIASES: &[(char, KeyCode)] = &[
+    ('j', KeyCode::Down),
+    ('n', KeyCode::Down),
+    ('k', KeyCode::Up),
+    ('p', KeyCode::Up),
+    ('q', KeyCode::Esc),
+];
+
+pub(crate) const CTRL_ALIASES: &[(char, KeyCode)] = &[
+    ('n', KeyCode::Down),
+    ('p', KeyCode::Up),
+    ('g', KeyCode::Esc),
+];
+
+fn lookup_alias(table: &[(char, KeyCode)], code: KeyCode) -> Option<KeyCode> {
+    let KeyCode::Char(c) = code else { return None };
+    table
+        .iter()
+        .find(|(alias, _)| *alias == c)
+        .map(|(_, target)| *target)
+}
+
+/// Shared key map for `tui_input`-backed filter fields (the mailbox
+/// picker and the command palette).
+pub(crate) fn input_request(key: KeyEvent) -> Option<InputRequest> {
+    match (key.code, key.modifiers) {
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
             Some(InputRequest::InsertChar(c))
         }
@@ -264,8 +278,13 @@ fn mailbox_filter_input(model: &mut Model, key: KeyEvent) {
         (KeyCode::Home, _) => Some(InputRequest::GoToStart),
         (KeyCode::End, _) => Some(InputRequest::GoToEnd),
         _ => None,
+    }
+}
+
+fn mailbox_filter_input(model: &mut Model, key: KeyEvent) {
+    let Some(req) = input_request(key) else {
+        return;
     };
-    let Some(req) = req else { return };
     model.mailbox_filter.handle(req);
     // Filter changed; snap selection to top of the narrowed list.
     model.dialog_index = 0;
@@ -469,45 +488,23 @@ fn dialog_previous(model: &mut Model) {
 fn dialog_confirm(model: &mut Model) -> Option<Message> {
     match model.dialog? {
         Dialog::Envelope => {
-            let action = model.selected_envelope_action();
+            let confirmed = selected_command_message(model, Dialog::Envelope);
             close_dialog(model);
-            match action {
-                EnvelopeAction::Read => Some(Message::ReadSelected),
-                EnvelopeAction::Reply => Some(Message::StartReplyToSelected { reply_all: false }),
-                EnvelopeAction::ReplyAll => Some(Message::StartReplyToSelected { reply_all: true }),
-                EnvelopeAction::Forward => Some(Message::StartForwardSelected),
-                EnvelopeAction::Copy => {
-                    open_dialog(model, Dialog::CopyTo);
-                    None
-                }
-                EnvelopeAction::Move => {
-                    open_dialog(model, Dialog::MoveTo);
-                    None
-                }
-                EnvelopeAction::AddFlag => {
-                    open_dialog(model, Dialog::FlagAdd);
-                    None
-                }
-                EnvelopeAction::RemoveFlag => {
-                    open_dialog(model, Dialog::FlagRemove);
-                    None
-                }
-            }
+            confirmed
         }
-        Dialog::Compose => {
-            let action = model.selected_compose_action();
-            match action {
-                ComposeAction::Send => Some(Message::SendCompose),
-                ComposeAction::Preview => Some(Message::PreviewCompose),
-                ComposeAction::SaveToDrafts => Some(Message::SaveComposeToDrafts),
-                ComposeAction::Cancel => Some(Message::CancelCompose),
-            }
-        }
+        // Stays open so a failed send/preview leaves the menu usable.
+        Dialog::Compose => selected_command_message(model, Dialog::Compose),
         Dialog::CopyTo => Some(Message::CopySelectedToTarget),
         Dialog::MoveTo => Some(Message::MoveSelectedToTarget),
         Dialog::FlagAdd => Some(Message::FlagSelected { add: true }),
         Dialog::FlagRemove => Some(Message::FlagSelected { add: false }),
     }
+}
+
+fn selected_command_message(model: &Model, dialog: Dialog) -> Option<Message> {
+    command::for_context(dialog.command_context()?)
+        .nth(model.dialog_index)
+        .map(Command::dispatch)
 }
 
 fn show_message(model: &mut Model, content: String) {
@@ -892,5 +889,53 @@ pub fn decode_message_body(raw: &[u8]) -> Result<String> {
         Ok(html2text::from_read(html.as_bytes(), 80)?)
     } else {
         Ok(String::from_utf8_lossy(raw).to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::email::envelope::Envelope;
+
+    fn press(model: &mut Model, code: KeyCode, modifiers: KeyModifiers) {
+        apply_all(model, Some(Message::Key(KeyEvent::new(code, modifiers))));
+    }
+
+    #[test]
+    fn ctrl_c_starts_a_new_draft() {
+        let mut model = Model::default();
+        press(&mut model, KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+        assert_eq!(model.bottom_panel, BottomPanel::Compose);
+        assert_eq!(model.active_panel, Panel::Compose);
+    }
+
+    #[test]
+    fn reply_key_dispatches_into_the_reply_flow() {
+        let mut model = Model::default();
+        model.envelopes.push(Envelope::stub());
+        model.selected_mailbox = Some("INBOX".into());
+
+        press(&mut model, KeyCode::Char('r'), KeyModifiers::NONE);
+
+        // The backend-less client cannot fetch the message, so landing
+        // on the fetch error proves `r` dispatched into the reply flow.
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.starts_with("Error")),
+            "expected a fetch error status, got {:?}",
+            model.status_message
+        );
+    }
+
+    #[test]
+    fn unbound_keys_do_nothing() {
+        let mut model = Model::default();
+        press(&mut model, KeyCode::Char('z'), KeyModifiers::NONE);
+
+        assert!(model.status_message.is_none());
+        assert_eq!(model.bottom_panel, BottomPanel::None);
     }
 }
