@@ -32,7 +32,7 @@ use url::Url;
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeListing, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -63,7 +63,7 @@ impl JmapClient {
         page: Option<u32>,
         page_size: Option<u32>,
         _with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeListing> {
         let (position, limit) = compute_position_limit(page, page_size);
         let filter = JmapEmailFilter {
             in_mailbox: Some(mailbox.to_string()),
@@ -78,7 +78,10 @@ impl JmapClient {
             ..Default::default()
         })?;
 
-        Ok(output.emails.into_iter().map(envelope_from).collect())
+        Ok(EnvelopeListing {
+            envelopes: output.emails.into_iter().map(envelope_from).collect(),
+            total: output.total,
+        })
     }
 
     /// Adds, sets, or removes `flags` (JMAP keywords) on an email id

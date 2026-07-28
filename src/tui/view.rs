@@ -106,12 +106,8 @@ fn render_status_bar(frame: &mut Frame, model: &Model, area: Rect) {
             BottomPanel::MessagePreview => "Esc: back to compose",
             BottomPanel::Compose => "Esc: actions",
         };
-        format!(
-            " {} | {} msgs | Tab: panel | {}",
-            mailbox,
-            model.envelopes.len(),
-            mode_hint
-        )
+        let message_count = model.envelope_total.unwrap_or(model.envelopes.len() as u64);
+        format!(" {mailbox} | {message_count} msgs | Tab: panel | {mode_hint}")
     };
 
     let status_bar = Paragraph::new(status).style(model.theme.status_bar);
@@ -196,11 +192,11 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
             model
                 .selected_mailbox_name()
                 .map(|m| {
-                    let total_pages = model.total_pages();
-                    if total_pages > 1 {
-                        format!(" - {} ({}/{})", m, model.envelope_page + 1, total_pages)
-                    } else {
-                        format!(" - {}", m)
+                    let page = model.envelope_page + 1;
+                    match model.total_pages() {
+                        Some(count) if count > 1 => format!(" - {m} ({page}/{count})"),
+                        Some(_) => format!(" - {m}"),
+                        None => format!(" - {m} ({page})"),
                     }
                 })
                 .unwrap_or_default()

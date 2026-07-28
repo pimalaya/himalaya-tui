@@ -36,7 +36,7 @@ use rfc2047_decoder::{Decoder, RecoverStrategy};
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeListing, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -84,13 +84,17 @@ impl ImapClient {
         page: Option<u32>,
         page_size: Option<u32>,
         with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeListing> {
         let mbox = parse_mailbox(mailbox)?;
         let select = self.select(mbox, ImapMailboxSelectOptions::default())?;
         let exists = select.exists.unwrap_or(0);
+        let total = Some(u64::from(exists));
 
         let Some(window) = compute_window(exists, page, page_size) else {
-            return Ok(Vec::new());
+            return Ok(EnvelopeListing {
+                envelopes: Vec::new(),
+                total,
+            });
         };
         let sequence_set: SequenceSet = window
             .as_str()
@@ -109,7 +113,7 @@ impl ImapClient {
             .map(|(seq, items)| envelope_from(seq.get(), items.into_inner()))
             .collect();
 
-        Ok(envelopes)
+        Ok(EnvelopeListing { envelopes, total })
     }
 
     /// Adds, sets, or removes `flags` on a UID set in `mailbox`.

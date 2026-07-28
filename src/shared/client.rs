@@ -23,7 +23,7 @@ use crate::smtp::client::SmtpClient;
 use crate::{
     config::AccountConfig,
     email::{
-        envelope::Envelope,
+        envelope::EnvelopeListing,
         flag::{Flag, FlagOp},
         mailbox::Mailbox,
     },
@@ -118,7 +118,7 @@ impl EmailClient {
         page: Option<u32>,
         page_size: Option<u32>,
         with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeListing> {
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => {

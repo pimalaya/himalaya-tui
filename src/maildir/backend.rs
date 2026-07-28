@@ -22,7 +22,7 @@ use mail_parser::Address as MailParserAddress;
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeListing, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -58,7 +58,7 @@ impl MaildirClient {
         page: Option<u32>,
         page_size: Option<u32>,
         _with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeListing> {
         let maildir = self.resolve_maildir(Path::new(mailbox))?;
         let entries: Vec<_> = self.list_entries(maildir)?.into_iter().collect();
         let fulls = self.read_entries(&entries)?;
@@ -66,7 +66,11 @@ impl MaildirClient {
         let mut envelopes: Vec<Envelope> = fulls.iter().map(envelope_from_entry).collect();
         envelopes.sort_by_key(|envelope| Reverse(envelope.date));
 
-        Ok(paginate(envelopes, page, page_size))
+        let total = envelopes.len() as u64;
+        Ok(EnvelopeListing {
+            envelopes: paginate(envelopes, page, page_size),
+            total: Some(total),
+        })
     }
 
     /// Adds, sets, or removes `flags` on a Maildir id set.

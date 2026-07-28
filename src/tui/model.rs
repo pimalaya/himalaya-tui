@@ -49,7 +49,7 @@ pub struct Model {
     pub envelope_offset: usize,
     pub envelope_page: usize,
     pub envelope_page_size: usize,
-    pub envelope_total: u32,
+    pub envelope_total: Option<u64>,
     pub selected_mailbox: Option<String>,
     pub account_name: String,
     pub from: Option<String>,
@@ -123,12 +123,13 @@ impl Model {
         }
     }
 
-    pub fn total_pages(&self) -> usize {
-        if self.envelope_page_size == 0 || self.envelope_total == 0 {
-            1
-        } else {
-            (self.envelope_total as usize).div_ceil(self.envelope_page_size)
-        }
+    pub fn total_pages(&self) -> Option<usize> {
+        total_pages(self.envelope_total, self.envelope_page_size)
+    }
+
+    pub fn can_advance_envelope_page(&self) -> bool {
+        let is_full_page = self.envelopes.len() == self.envelope_page_size;
+        can_advance_page(self.envelope_page, self.total_pages(), is_full_page)
     }
 
     pub fn compose_content(&self) -> String {
@@ -157,7 +158,7 @@ impl Model {
             envelope_offset: 0,
             envelope_page: 0,
             envelope_page_size: DEFAULT_ENVELOPE_PAGE_SIZE,
-            envelope_total: 0,
+            envelope_total: None,
             selected_mailbox: None,
             account_name: String::new(),
             from: None,
@@ -185,6 +186,24 @@ impl Model {
 impl Default for Model {
     fn default() -> Self {
         Self::new(EmailClient::default())
+    }
+}
+
+fn total_pages(total: Option<u64>, page_size: usize) -> Option<usize> {
+    let total = total?;
+    if page_size == 0 {
+        return Some(1);
+    }
+    Some((total as usize).div_ceil(page_size))
+}
+
+/// Whether paging forward from 0-indexed `page` is allowed. With an
+/// unknown page count, a full current page is taken as evidence more
+/// may follow; a short page is the end.
+fn can_advance_page(page: usize, total_pages: Option<usize>, is_full_page: bool) -> bool {
+    match total_pages {
+        Some(count) => page + 1 < count,
+        None => is_full_page,
     }
 }
 
@@ -331,4 +350,33 @@ pub enum Message {
     PreviewCompose,
     SaveComposeToDrafts,
     CancelCompose,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_total_yields_page_count() {
+        assert_eq!(total_pages(Some(120), 50), Some(3));
+        assert_eq!(total_pages(Some(50), 50), Some(1));
+        assert_eq!(total_pages(Some(0), 50), Some(0));
+    }
+
+    #[test]
+    fn unknown_total_yields_no_page_count() {
+        assert_eq!(total_pages(None, 50), None);
+    }
+
+    #[test]
+    fn known_total_bounds_advancing() {
+        assert!(can_advance_page(1, Some(3), true));
+        assert!(!can_advance_page(2, Some(3), true));
+    }
+
+    #[test]
+    fn full_page_with_unknown_total_can_advance() {
+        assert!(can_advance_page(0, None, true));
+        assert!(!can_advance_page(0, None, false));
+    }
 }

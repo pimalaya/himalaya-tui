@@ -57,6 +57,16 @@ pub struct Envelope {
     pub has_attachment: Option<bool>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvelopeListing {
+    pub envelopes: Vec<Envelope>,
+
+    /// Total number of messages in the mailbox, `None` when the
+    /// backend cannot report it (e.g. a JMAP server omitting `total`,
+    /// RFC 8620 §5.5).
+    pub total: Option<u64>,
+}
+
 /// Strips RFC 5322 `msg-id` wrappers from the raw `Message-ID:` value
 /// so every backend's [`Envelope::message_id`] is comparable
 /// byte-for-byte. Whitespace and a single pair of angle brackets are

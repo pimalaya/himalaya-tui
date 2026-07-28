@@ -375,11 +375,7 @@ fn select_mailbox(model: &mut Model) {
         return;
     };
     model.selected_mailbox = Some(m.id.clone());
-    model.envelope_index = 0;
-    model.envelope_offset = 0;
-    model.envelope_page = 0;
-    model.envelope_total = 0;
-    model.envelopes.clear();
+    reset_envelope_paging(model);
     close_bottom_panel(model);
     model.active_panel = Panel::Envelopes;
     model.status_message = Some(format!("Loading envelopes from {}…", m.name));
@@ -387,11 +383,7 @@ fn select_mailbox(model: &mut Model) {
 
 fn unselect_mailbox(model: &mut Model) {
     model.selected_mailbox = None;
-    model.envelopes.clear();
-    model.envelope_index = 0;
-    model.envelope_offset = 0;
-    model.envelope_page = 0;
-    model.envelope_total = 0;
+    reset_envelope_paging(model);
     close_bottom_panel(model);
     model.active_panel = Panel::Mailboxes;
 }
@@ -409,8 +401,16 @@ fn set_mailboxes(model: &mut Model, mailboxes: Vec<Mailbox>) {
     model.status_message = None;
 }
 
+fn reset_envelope_paging(model: &mut Model) {
+    model.envelopes.clear();
+    model.envelope_index = 0;
+    model.envelope_offset = 0;
+    model.envelope_page = 0;
+    model.envelope_total = None;
+}
+
 fn next_envelope_page(model: &mut Model) -> bool {
-    if model.envelope_page + 1 < model.total_pages() {
+    if model.can_advance_envelope_page() {
         model.envelope_page += 1;
         true
     } else {
@@ -661,14 +661,11 @@ fn load_envelopes(model: &mut Model) {
         .client
         .list_envelopes(&mailbox, page, page_size, false);
     match result {
-        Ok(envelopes) => {
-            // NOTE: the shared API does not yet return a total; we
-            // approximate with the current page length.
-            let total = envelopes.len() as u32;
-            model.envelopes = envelopes;
+        Ok(listing) => {
+            model.envelopes = listing.envelopes;
             model.envelope_index = 0;
             model.envelope_offset = 0;
-            model.envelope_total = total;
+            model.envelope_total = listing.total;
             model.status_message = None;
         }
         Err(e) => set_status(model, format!("Error: {e}")),

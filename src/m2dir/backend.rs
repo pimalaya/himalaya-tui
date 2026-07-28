@@ -17,7 +17,7 @@ use mail_parser::{Address as MailParserAddress, Message as ParsedMessage, Messag
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeListing, normalize_message_id},
         flag::{Flag, FlagOp},
         mailbox::Mailbox,
     },
@@ -49,7 +49,7 @@ impl M2dirClient {
         page: Option<u32>,
         page_size: Option<u32>,
         with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeListing> {
         let m2dir = self.open_m2dir(mailbox)?;
         let entries = self.list_entries(m2dir.clone())?;
 
@@ -68,7 +68,11 @@ impl M2dirClient {
         }
         envelopes.sort_by_key(|envelope| Reverse(envelope.date));
 
-        Ok(paginate(envelopes, page, page_size))
+        let total = envelopes.len() as u64;
+        Ok(EnvelopeListing {
+            envelopes: paginate(envelopes, page, page_size),
+            total: Some(total),
+        })
     }
 
     /// Adds, sets, or removes `flags` on an m2dir id set.
