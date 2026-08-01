@@ -32,3 +32,16 @@ pub struct Mailbox {
     #[serde(default)]
     pub unread: Option<u64>,
 }
+
+#[cfg(test)]
+impl Mailbox {
+    /// Minimal fixture: `id == name`, no counts (the non-JMAP shape).
+    pub(crate) fn stub(name: &str) -> Self {
+        Self {
+            id: name.into(),
+            name: name.into(),
+            total: None,
+            unread: None,
+        }
+    }
+}

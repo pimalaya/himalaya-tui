@@ -63,19 +63,10 @@ mod tests {
         },
     };
 
-    fn mailbox(name: &str) -> Mailbox {
-        Mailbox {
-            id: name.into(),
-            name: name.into(),
-            total: None,
-            unread: None,
-        }
-    }
-
     /// Envelope commands available; transfer targets INBOX, Archive, Sent.
     fn transfer_ready_model() -> Model {
         let mut model = Model {
-            mailboxes: ["INBOX", "Archive", "Sent"].map(mailbox).to_vec(),
+            mailboxes: ["INBOX", "Archive", "Sent"].map(Mailbox::stub).to_vec(),
             ..Model::default()
         };
         model.envelopes.push(Envelope::stub());
@@ -170,7 +161,7 @@ mod tests {
     fn unavailable_command_never_enters_argument_mode() {
         // No envelope is selected, so `copy` is greyed out.
         let mut model = Model {
-            mailboxes: ["INBOX"].map(mailbox).to_vec(),
+            mailboxes: ["INBOX"].map(Mailbox::stub).to_vec(),
             ..Model::default()
         };
         open_palette(&mut model);
@@ -191,6 +182,41 @@ mod tests {
         };
         open_palette(&mut model);
         type_filter(&mut model, "switch-account wo");
+
+        assert_eq!(listed_candidates(&model), ["work"]);
+        let confirmed = update(&mut model, PaletteMessage::Confirm);
+        assert!(
+            matches!(confirmed, Some(Message::SwitchAccount(ref name)) if name == "work"),
+            "expected SwitchAccount(work), got {confirmed:?}"
+        );
+    }
+
+    #[test]
+    fn switch_folder_alias_dispatches_the_switch() {
+        let mut model = Model {
+            mailboxes: ["INBOX", "Archive", "Sent"].map(Mailbox::stub).to_vec(),
+            ..Model::default()
+        };
+        open_palette(&mut model);
+        type_filter(&mut model, "sf ar");
+
+        assert_eq!(listed_candidates(&model), ["Archive"]);
+        let confirmed = update(&mut model, PaletteMessage::Confirm);
+        assert!(
+            matches!(confirmed, Some(Message::SwitchFolder(ref id)) if id == "Archive"),
+            "expected SwitchFolder(Archive), got {confirmed:?}"
+        );
+    }
+
+    #[test]
+    fn switch_account_alias_dispatches_the_switch() {
+        let mut model = Model {
+            config_source: Some(Vec::new()),
+            account_names: vec!["personal".into(), "work".into()],
+            ..Model::default()
+        };
+        open_palette(&mut model);
+        type_filter(&mut model, "sa wo");
 
         assert_eq!(listed_candidates(&model), ["work"]);
         let confirmed = update(&mut model, PaletteMessage::Confirm);

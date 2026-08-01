@@ -29,7 +29,7 @@ use crate::{
     },
 };
 
-/// Number of mailbox rows visible inside the CopyTo/MoveTo dialog
+/// Number of mailbox rows visible inside a mailbox-picker dialog's
 /// list block. Both the view (frame sizing) and the update layer
 /// (selection clamping) depend on this constant.
 pub const MAILBOX_DIALOG_VISIBLE: usize = 10;
@@ -182,8 +182,10 @@ impl Model {
         if let Some(context) = dialog.command_context() {
             return command::for_context(context).count();
         }
+        if dialog.is_mailbox_picker() {
+            return self.filtered_mailboxes().len();
+        }
         match dialog {
-            Dialog::CopyTo | Dialog::MoveTo => self.filtered_mailboxes().len(),
             Dialog::SwitchAccount => self.account_names.len(),
             _ => FlagAction::ALL.len(),
         }
@@ -326,6 +328,7 @@ pub enum Dialog {
     Compose,
     CopyTo,
     MoveTo,
+    SwitchFolder,
     FlagAdd,
     FlagRemove,
     SwitchAccount,
@@ -340,10 +343,17 @@ impl Dialog {
             Dialog::Compose => Some(CommandContext::Composer),
             Dialog::CopyTo
             | Dialog::MoveTo
+            | Dialog::SwitchFolder
             | Dialog::FlagAdd
             | Dialog::FlagRemove
             | Dialog::SwitchAccount => None,
         }
+    }
+
+    /// Pickers backed by the shared mailbox filter: they route keys
+    /// to [`Message::MailboxFilterKey`] and clamp instead of wrapping.
+    pub fn is_mailbox_picker(self) -> bool {
+        matches!(self, Dialog::CopyTo | Dialog::MoveTo | Dialog::SwitchFolder)
     }
 }
 
@@ -443,6 +453,9 @@ pub enum Message {
     /// contract; display names are looked up only for status text.
     CopySelectedTo(String),
     MoveSelectedTo(String),
+    /// Selects the mailbox with this id (syncing the panel cursor)
+    /// and reloads the envelope list.
+    SwitchFolder(String),
     FlagSelected {
         add: bool,
         action: FlagAction,

@@ -3,6 +3,8 @@
 //! fields during layout); never produces a [`crate::tui::model::Message`]
 //! or touches [`crate::tui::update`].
 
+use std::borrow::Cow;
+
 use edtui::{EditorTheme, EditorView};
 use ratatui::{
     Frame,
@@ -397,6 +399,7 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
             };
             render_mailbox_dialog(frame, model, &transfer_dialog_title(model, verb));
         }
+        Some(Dialog::SwitchFolder) => render_mailbox_dialog(frame, model, " Switch Folder "),
         Some(dialog @ (Dialog::FlagAdd | Dialog::FlagRemove)) => {
             let base = if dialog == Dialog::FlagAdd {
                 "Add Flag"
@@ -473,6 +476,13 @@ fn render_command_dialog(frame: &mut Frame, model: &Model, dialog: Dialog) {
 /// and the filter input; bottom is an untitled, fixed-height results
 /// frame so the dialog size does not jump as the filter narrows.
 fn render_mailbox_dialog(frame: &mut Frame, model: &Model, title: &str) {
+    // Only the folder switcher marks the active mailbox; a Copy/Move
+    // target being current is not meaningful.
+    let current_id = match model.dialog {
+        Some(Dialog::SwitchFolder) => model.selected_mailbox.as_deref(),
+        _ => None,
+    };
+
     let list_inner = render_filter_overlay(
         frame,
         &model.theme,
@@ -487,10 +497,15 @@ fn render_mailbox_dialog(frame: &mut Frame, model: &Model, title: &str) {
         .take(MAILBOX_DIALOG_VISIBLE)
         .enumerate()
         .map(|(i, m)| {
-            ListItem::new(Line::from(if i == model.dialog_index {
-                Span::styled(format!("> {}", m.name), model.theme.cursor)
+            let label: Cow<'_, str> = if current_id == Some(m.id.as_str()) {
+                Cow::Owned(format!("{} (current)", m.name))
             } else {
-                Span::styled(&m.name, model.theme.message_body)
+                Cow::Borrowed(m.name.as_str())
+            };
+            ListItem::new(Line::from(if i == model.dialog_index {
+                Span::styled(format!("> {label}"), model.theme.cursor)
+            } else {
+                Span::styled(label, model.theme.message_body)
             }))
         })
         .collect();

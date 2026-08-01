@@ -35,7 +35,7 @@ fn envelopes_focused(model: &Model) -> bool {
     model.active_panel == Panel::Envelopes
 }
 
-fn transfer_candidates(model: &Model, message: fn(String) -> Message) -> Vec<Candidate> {
+fn mailbox_candidates(model: &Model, message: fn(String) -> Message) -> Vec<Candidate> {
     model
         .mailboxes
         .iter()
@@ -47,11 +47,11 @@ fn transfer_candidates(model: &Model, message: fn(String) -> Message) -> Vec<Can
 }
 
 fn copy_candidates(model: &Model) -> Vec<Candidate> {
-    transfer_candidates(model, Message::CopySelectedTo)
+    mailbox_candidates(model, Message::CopySelectedTo)
 }
 
 fn move_candidates(model: &Model) -> Vec<Candidate> {
-    transfer_candidates(model, Message::MoveSelectedTo)
+    mailbox_candidates(model, Message::MoveSelectedTo)
 }
 
 fn flag_candidates(add: bool) -> Vec<Candidate> {
@@ -77,6 +77,14 @@ fn remove_flag_candidates(_: &Model) -> Vec<Candidate> {
 
 fn has_config_source(model: &Model) -> bool {
     model.config_source.is_some()
+}
+
+fn has_mailboxes(model: &Model) -> bool {
+    !model.mailboxes.is_empty()
+}
+
+fn switch_folder_candidates(model: &Model) -> Vec<Candidate> {
+    mailbox_candidates(model, Message::SwitchFolder)
 }
 
 /// Shared by the palette's argument mode and the SwitchAccount
@@ -302,9 +310,19 @@ pub const COMMANDS: &[Command] = &[
         arg: None,
     },
     Command {
+        id: "switch-folder",
+        name: "Switch folder",
+        aliases: &["sf"],
+        bindings: &[],
+        context: CommandContext::Global,
+        is_available: has_mailboxes,
+        message: || Message::OpenDialog(Dialog::SwitchFolder),
+        arg: Some(switch_folder_candidates),
+    },
+    Command {
         id: "switch-account",
         name: "Switch account",
-        aliases: &[],
+        aliases: &["sa"],
         bindings: &[plain(';')],
         context: CommandContext::Global,
         is_available: has_config_source,
@@ -330,7 +348,7 @@ mod tests {
     use super::*;
     use crate::{
         config::DEFAULT_PALETTE_KEY,
-        email::envelope::Envelope,
+        email::{envelope::Envelope, mailbox::Mailbox},
         tui::{
             command::for_context,
             model::BottomPanel,
@@ -482,6 +500,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn switch_folder_requires_mailboxes() {
+        let mut model = Model::default();
+        let command = by_id("switch-folder");
+        assert!(!(command.is_available)(&model));
+
+        model.mailboxes.push(Mailbox::stub("INBOX"));
+        assert!((command.is_available)(&model));
+    }
+
+    #[test]
+    fn switch_folder_candidates_dispatch_mailbox_ids() {
+        let model = Model {
+            mailboxes: vec![Mailbox {
+                id: "jmap-mailbox-1".into(),
+                ..Mailbox::stub("Archive")
+            }],
+            ..Model::default()
+        };
+
+        let candidates = switch_folder_candidates(&model);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].label, "Archive");
+        assert!(
+            matches!(&candidates[0].message, Message::SwitchFolder(id) if id == "jmap-mailbox-1"),
+            "candidates must dispatch the mailbox id, got {:?}",
+            candidates[0].message
+        );
     }
 
     #[test]

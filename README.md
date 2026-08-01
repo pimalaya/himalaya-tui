@@ -171,6 +171,10 @@ composer):
 | `F5` | Reload mailboxes |
 | `;` | Switch account (dialog, or `:switch-account <name>` in the palette) |
 
+Palette-only commands: `:switch-folder <name>` (alias `:sf`) jumps to a
+mailbox without leaving the envelope list, opening the same filterable picker
+as Copy/Move when given no argument; `:sa` abbreviates `:switch-account`.
+
 With a selection active, Copy, Move and the flag commands apply to every
 selected envelope in one backend call; without one they act on the hovered
 envelope. `Esc` clears the selection first, and changing page or mailbox

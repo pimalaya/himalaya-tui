@@ -178,6 +178,7 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             do_transfer(model, &target_id, true);
             None
         }
+        Message::SwitchFolder(mailbox_id) => switch_folder(model, &mailbox_id),
         Message::FlagSelected { add, action } => {
             do_flag(model, add, action);
             None
@@ -227,7 +228,7 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         return Some(Message::EditorKey(key));
     }
 
-    let in_mailbox_dialog = matches!(model.dialog, Some(Dialog::CopyTo | Dialog::MoveTo));
+    let in_mailbox_dialog = model.dialog.is_some_and(Dialog::is_mailbox_picker);
 
     let translated = match key.modifiers {
         KeyModifiers::NONE if !in_mailbox_dialog => lookup_alias(PLAIN_ALIASES, key.code),
@@ -437,6 +438,18 @@ fn select_mailbox(model: &mut Model) {
     model.status_message = Some(format!("Loading envelopes from {}…", m.name));
 }
 
+/// By-id counterpart of [`select_mailbox`]; the cursor sync keeps the
+/// left panel pointing at the active folder.
+fn switch_folder(model: &mut Model, mailbox_id: &str) -> Option<Message> {
+    let Some(position) = model.mailboxes.iter().position(|m| m.id == mailbox_id) else {
+        set_status(model, format!("Folder not found: {mailbox_id}"));
+        return None;
+    };
+    model.mailbox_index = position;
+    select_mailbox(model);
+    Some(Message::LoadEnvelopes)
+}
+
 fn unselect_mailbox(model: &mut Model) {
     model.selected_mailbox = None;
     reset_envelope_paging(model);
@@ -526,7 +539,7 @@ fn dialog_next(model: &mut Model) {
     if count == 0 {
         return;
     }
-    if matches!(model.dialog, Some(Dialog::CopyTo | Dialog::MoveTo)) {
+    if model.dialog.is_some_and(Dialog::is_mailbox_picker) {
         let max = MAILBOX_DIALOG_VISIBLE.min(count) - 1;
         model.dialog_index = (model.dialog_index + 1).min(max);
     } else {
@@ -539,7 +552,7 @@ fn dialog_previous(model: &mut Model) {
     if count == 0 {
         return;
     }
-    if matches!(model.dialog, Some(Dialog::CopyTo | Dialog::MoveTo)) {
+    if model.dialog.is_some_and(Dialog::is_mailbox_picker) {
         model.dialog_index = model.dialog_index.saturating_sub(1);
     } else {
         model.dialog_index = model.dialog_index.checked_sub(1).unwrap_or(count - 1);
@@ -555,8 +568,9 @@ fn dialog_confirm(model: &mut Model) -> Option<Message> {
         }
         // Stays open so a failed send/preview leaves the menu usable.
         Dialog::Compose => selected_command_message(model, Dialog::Compose),
-        Dialog::CopyTo => transfer_target(model).map(Message::CopySelectedTo),
-        Dialog::MoveTo => transfer_target(model).map(Message::MoveSelectedTo),
+        Dialog::CopyTo => picked_mailbox_id(model).map(Message::CopySelectedTo),
+        Dialog::MoveTo => picked_mailbox_id(model).map(Message::MoveSelectedTo),
+        Dialog::SwitchFolder => picked_mailbox_id(model).map(Message::SwitchFolder),
         Dialog::FlagAdd => confirm_flag(model, true),
         Dialog::FlagRemove => confirm_flag(model, false),
         Dialog::SwitchAccount => confirm_switch_account(model),
@@ -575,7 +589,7 @@ fn confirm_switch_account(model: &mut Model) -> Option<Message> {
 // The picker dialogs close here, not in the transfer/flag handlers:
 // the dialog layer owns its lifecycle, and the handlers are also
 // reachable from the palette with no dialog open.
-fn transfer_target(model: &mut Model) -> Option<String> {
+fn picked_mailbox_id(model: &mut Model) -> Option<String> {
     let target_id = model
         .filtered_mailboxes()
         .get(model.dialog_index)
@@ -1085,6 +1099,68 @@ mod tests {
 
         assert!(model.dialog.is_none());
         assert!(model.status_message.is_none());
+    }
+
+    fn model_with_mailboxes(names: &[&str]) -> Model {
+        Model {
+            mailboxes: names.iter().map(|name| Mailbox::stub(name)).collect(),
+            ..Model::default()
+        }
+    }
+
+    #[test]
+    fn switch_folder_selects_by_id_and_syncs_the_cursor() {
+        let mut model = model_with_mailboxes(&["INBOX", "Archive", "Sent"]);
+        model.envelope_page = 3;
+        model.selected_envelope_ids.insert("1".into());
+
+        let follow_up = apply(&mut model, Message::SwitchFolder("Archive".into()));
+
+        assert_eq!(model.selected_mailbox.as_deref(), Some("Archive"));
+        assert_eq!(model.mailbox_index, 1);
+        assert_eq!(model.active_panel, Panel::Envelopes);
+        assert_eq!(model.envelope_page, 0);
+        assert!(model.selected_envelope_ids.is_empty());
+        assert!(
+            matches!(follow_up, Some(Message::LoadEnvelopes)),
+            "expected a LoadEnvelopes follow-up, got {follow_up:?}"
+        );
+    }
+
+    #[test]
+    fn switch_folder_with_unknown_id_keeps_the_current_folder() {
+        let mut model = model_with_mailboxes(&["INBOX"]);
+        model.selected_mailbox = Some("INBOX".into());
+
+        let follow_up = apply(&mut model, Message::SwitchFolder("Ghost".into()));
+
+        assert!(follow_up.is_none());
+        assert_eq!(model.selected_mailbox.as_deref(), Some("INBOX"));
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.contains("Ghost")),
+            "expected a folder-not-found status, got {:?}",
+            model.status_message
+        );
+    }
+
+    #[test]
+    fn switch_folder_dialog_confirm_dispatches_the_filtered_row() {
+        let mut model = model_with_mailboxes(&["INBOX", "Archive", "Sent"]);
+        apply_all(&mut model, Some(Message::OpenDialog(Dialog::SwitchFolder)));
+
+        press(&mut model, KeyCode::Char('a'), KeyModifiers::NONE);
+        press(&mut model, KeyCode::Char('r'), KeyModifiers::NONE);
+        press(&mut model, KeyCode::Enter, KeyModifiers::NONE);
+
+        assert!(model.dialog.is_none());
+        assert_eq!(model.selected_mailbox.as_deref(), Some("Archive"));
+        assert!(
+            model.mailbox_filter.value().is_empty(),
+            "closing the dialog should reset the filter"
+        );
     }
 
     #[test]
