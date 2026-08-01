@@ -48,6 +48,7 @@ impl KeyBinding {
 
     fn label(&self) -> String {
         let key = match self.code {
+            KeyCode::Char(' ') => "Space".to_string(),
             KeyCode::Char(c) => c.to_string(),
             KeyCode::PageDown => "PgDn".to_string(),
             KeyCode::PageUp => "PgUp".to_string(),
@@ -222,6 +223,11 @@ mod tests {
                 Some("F5".to_string())
             );
             assert_eq!(by_id("reply").hint(flavor), Some("r".to_string()));
+            assert_eq!(
+                by_id("select-toggle").hint(flavor),
+                Some("Space".to_string())
+            );
+            assert_eq!(by_id("select-clear").hint(flavor), None);
             assert_eq!(by_id("quit").hint(flavor), None);
             assert_eq!(by_id("send").hint(flavor), None);
         }

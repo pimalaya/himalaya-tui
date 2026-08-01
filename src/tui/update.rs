@@ -29,7 +29,10 @@ use crate::{
     },
     tui::{
         command::{self, Command, KeyBinding},
-        model::{BottomPanel, Dialog, FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel},
+        model::{
+            BottomPanel, Dialog, FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
+            format_message_count,
+        },
         palette::{self, PaletteMessage},
     },
 };
@@ -136,6 +139,22 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::LoadMailboxes => load_mailboxes(model),
         Message::LoadEnvelopes => {
             load_envelopes(model);
+            None
+        }
+        Message::ToggleSelectHovered => {
+            toggle_select_hovered(model);
+            None
+        }
+        Message::SelectAllVisible => {
+            select_all_visible(model);
+            None
+        }
+        Message::InvertSelectionVisible => {
+            invert_selection_visible(model);
+            None
+        }
+        Message::ClearSelection => {
+            model.selected_envelope_ids.clear();
             None
         }
         Message::ReadSelected => {
@@ -299,10 +318,42 @@ fn esc_cascade(model: &mut Model) -> Option<Message> {
         close_preview(model);
         return None;
     }
+    if model.has_selection() {
+        return Some(Message::ClearSelection);
+    }
     if !close_current(model) {
         return Some(Message::Quit);
     }
     None
+}
+
+fn toggle_select_hovered(model: &mut Model) {
+    let Some(id) = model.selected_envelope().map(|e| e.id.clone()) else {
+        return;
+    };
+    if !model.selected_envelope_ids.remove(&id) {
+        model.selected_envelope_ids.insert(id);
+    }
+    advance_envelope_cursor(model);
+}
+
+fn advance_envelope_cursor(model: &mut Model) {
+    if model.envelope_index + 1 < model.envelopes.len() {
+        model.envelope_index += 1;
+    }
+}
+
+fn select_all_visible(model: &mut Model) {
+    let ids = model.envelopes.iter().map(|e| e.id.clone());
+    model.selected_envelope_ids.extend(ids);
+}
+
+fn invert_selection_visible(model: &mut Model) {
+    for envelope in &model.envelopes {
+        if !model.selected_envelope_ids.remove(&envelope.id) {
+            model.selected_envelope_ids.insert(envelope.id.clone());
+        }
+    }
 }
 
 fn toggle_panel(model: &mut Model) {
@@ -325,11 +376,7 @@ fn next_item(model: &mut Model) {
                 model.mailbox_index += 1;
             }
         }
-        Panel::Envelopes => {
-            if model.envelope_index + 1 < model.envelopes.len() {
-                model.envelope_index += 1;
-            }
-        }
+        Panel::Envelopes => advance_envelope_cursor(model),
         Panel::Message => {
             model.message_scroll = model.message_scroll.saturating_add(1);
         }
@@ -407,6 +454,7 @@ fn reset_envelope_paging(model: &mut Model) {
     model.envelope_offset = 0;
     model.envelope_page = 0;
     model.envelope_total = None;
+    model.selected_envelope_ids.clear();
 }
 
 fn next_envelope_page(model: &mut Model) -> bool {
@@ -427,24 +475,28 @@ fn prev_envelope_page(model: &mut Model) -> bool {
     }
 }
 
-fn remove_selected_envelope(model: &mut Model) {
-    if model.envelope_index < model.envelopes.len() {
-        model.envelopes.remove(model.envelope_index);
-        if model.envelope_index >= model.envelopes.len() && model.envelope_index > 0 {
-            model.envelope_index -= 1;
+/// Drops the rows and their selection entries together, keeping the
+/// selection a subset of the visible page.
+fn remove_envelopes_by_id(model: &mut Model, ids: &[String]) {
+    model.envelopes.retain(|e| !ids.contains(&e.id));
+    for id in ids {
+        model.selected_envelope_ids.remove(id);
+    }
+    if model.envelope_index >= model.envelopes.len() {
+        model.envelope_index = model.envelopes.len().saturating_sub(1);
+    }
+}
+
+fn set_flag_on_envelopes(model: &mut Model, ids: &[String], flag: Flag, op: FlagOp) {
+    for envelope in model.envelopes.iter_mut().filter(|e| ids.contains(&e.id)) {
+        match op {
+            FlagOp::Add => {
+                envelope.flags.insert(flag.clone());
+            }
+            FlagOp::Remove => {
+                envelope.flags.remove(&flag);
+            }
         }
-    }
-}
-
-fn flag_selected_envelope(model: &mut Model, flag: Flag) {
-    if let Some(envelope) = model.envelopes.get_mut(model.envelope_index) {
-        envelope.flags.insert(flag);
-    }
-}
-
-fn unflag_selected_envelope(model: &mut Model, flag: Flag) {
-    if let Some(envelope) = model.envelopes.get_mut(model.envelope_index) {
-        envelope.flags.remove(&flag);
     }
 }
 
@@ -654,6 +706,10 @@ fn load_envelopes(model: &mut Model) {
         return;
     };
 
+    // A reload replaces the page; a stale selection must never
+    // survive it, even when the fetch fails.
+    model.selected_envelope_ids.clear();
+
     let page = Some(model.envelope_page as u32 + 1);
     let page_size = Some(model.envelope_page_size as u32);
 
@@ -724,9 +780,10 @@ fn fetch_for_forward(model: &mut Model) {
 }
 
 fn do_transfer(model: &mut Model, target_id: &str, is_move: bool) {
-    let Some(envelope) = model.selected_envelope().cloned() else {
+    let ids = model.bulk_target_ids();
+    if ids.is_empty() {
         return;
-    };
+    }
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
@@ -735,32 +792,35 @@ fn do_transfer(model: &mut Model, target_id: &str, is_move: bool) {
         .unwrap_or(target_id)
         .to_string();
 
-    let verb = if is_move { "Moving" } else { "Copying" };
-    set_status(model, format!("{verb} to {target_name}…"));
-
-    let result = if is_move {
-        model
-            .client
-            .move_messages(&mailbox, target_id, &[&envelope.id])
+    let (ing, ed) = if is_move {
+        ("Moving", "Moved")
     } else {
-        model
-            .client
-            .copy_messages(&mailbox, target_id, &[&envelope.id])
+        ("Copying", "Copied")
+    };
+    let count = format_message_count(ids.len());
+    set_status(model, format!("{ing} {count} to {target_name}…"));
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let result = if is_move {
+        model.client.move_messages(&mailbox, target_id, &id_refs)
+    } else {
+        model.client.copy_messages(&mailbox, target_id, &id_refs)
     };
     match result {
-        Ok(()) if is_move => {
-            remove_selected_envelope(model);
-            set_status(model, "Moved");
+        Ok(()) => {
+            if is_move {
+                remove_envelopes_by_id(model, &ids);
+            }
+            set_status(model, format!("{ed} {count} to {target_name}"));
         }
-        Ok(()) => set_status(model, "Copied"),
         Err(e) => set_status(model, format!("Error: {e}")),
     }
 }
 
 fn do_flag(model: &mut Model, add: bool, action: FlagAction) {
-    let Some(envelope) = model.selected_envelope().cloned() else {
+    let ids = model.bulk_target_ids();
+    if ids.is_empty() {
         return;
-    };
+    }
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
@@ -771,18 +831,17 @@ fn do_flag(model: &mut Model, add: bool, action: FlagAction) {
     set_status(model, format!("{verb} flag {label}…"));
 
     let op = if add { FlagOp::Add } else { FlagOp::Remove };
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let result = model
         .client
-        .store_flags(&mailbox, &[&envelope.id], slice::from_ref(&flag), op);
+        .store_flags(&mailbox, &id_refs, slice::from_ref(&flag), op);
 
     match result {
-        Ok(()) if add => {
-            flag_selected_envelope(model, flag);
-            set_status(model, format!("Flag {label} added"));
-        }
         Ok(()) => {
-            unflag_selected_envelope(model, flag);
-            set_status(model, format!("Flag {label} removed"));
+            set_flag_on_envelopes(model, &ids, flag, op);
+            let verb = if add { "added" } else { "removed" };
+            let count = format_message_count(ids.len());
+            set_status(model, format!("Flag {label} {verb} ({count})"));
         }
         Err(e) => set_status(model, format!("Error: {e}")),
     }
@@ -963,5 +1022,190 @@ mod tests {
 
         assert!(model.status_message.is_none());
         assert_eq!(model.bottom_panel, BottomPanel::None);
+    }
+
+    fn model_with_envelopes(ids: &[&str]) -> Model {
+        Model {
+            envelopes: ids.iter().map(|id| Envelope::stub_with_id(id)).collect(),
+            active_panel: Panel::Envelopes,
+            ..Model::default()
+        }
+    }
+
+    #[test]
+    fn toggle_select_marks_hovered_and_advances() {
+        let mut model = model_with_envelopes(&["1", "2"]);
+        apply_all(&mut model, Some(Message::ToggleSelectHovered));
+
+        assert!(model.selected_envelope_ids.contains("1"));
+        assert_eq!(model.envelope_index, 1);
+    }
+
+    #[test]
+    fn space_toggles_selection_through_the_registry() {
+        let mut model = model_with_envelopes(&["1", "2"]);
+        press(&mut model, KeyCode::Char(' '), KeyModifiers::NONE);
+
+        assert!(model.selected_envelope_ids.contains("1"));
+        assert_eq!(model.envelope_index, 1);
+    }
+
+    #[test]
+    fn toggle_select_advances_the_envelope_cursor_from_any_panel() {
+        let mut model = model_with_envelopes(&["1", "2"]);
+        model.active_panel = Panel::Mailboxes;
+        press(&mut model, KeyCode::Char(' '), KeyModifiers::NONE);
+
+        assert!(model.selected_envelope_ids.contains("1"));
+        assert_eq!(model.envelope_index, 1);
+        assert_eq!(
+            model.mailbox_index, 0,
+            "the mailbox cursor must not move as a toggle side effect"
+        );
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_and_ctrl_r_inverts_through_the_registry() {
+        let mut model = model_with_envelopes(&["1", "2", "3"]);
+        press(&mut model, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(model.selection_count(), 3);
+
+        press(&mut model, KeyCode::Char('r'), KeyModifiers::CONTROL);
+        assert!(model.selected_envelope_ids.is_empty());
+    }
+
+    #[test]
+    fn toggle_select_unmarks_an_already_selected_envelope() {
+        let mut model = model_with_envelopes(&["1", "2"]);
+        apply_all(&mut model, Some(Message::ToggleSelectHovered));
+        model.envelope_index = 0;
+        apply_all(&mut model, Some(Message::ToggleSelectHovered));
+
+        assert!(model.selected_envelope_ids.is_empty());
+    }
+
+    #[test]
+    fn toggle_select_without_envelopes_does_nothing() {
+        let mut model = model_with_envelopes(&[]);
+        apply_all(&mut model, Some(Message::ToggleSelectHovered));
+
+        assert!(model.selected_envelope_ids.is_empty());
+        assert_eq!(model.envelope_index, 0);
+    }
+
+    #[test]
+    fn select_all_selects_every_visible_envelope() {
+        let mut model = model_with_envelopes(&["1", "2", "3"]);
+        apply_all(&mut model, Some(Message::SelectAllVisible));
+
+        assert_eq!(model.selection_count(), 3);
+    }
+
+    #[test]
+    fn invert_selection_flips_membership() {
+        let mut model = model_with_envelopes(&["1", "2", "3"]);
+        model.selected_envelope_ids.insert("2".into());
+        apply_all(&mut model, Some(Message::InvertSelectionVisible));
+
+        assert!(model.selected_envelope_ids.contains("1"));
+        assert!(!model.selected_envelope_ids.contains("2"));
+        assert!(model.selected_envelope_ids.contains("3"));
+    }
+
+    #[test]
+    fn esc_clears_selection_before_closing_anything() {
+        let mut model = model_with_envelopes(&["1"]);
+        model.selected_mailbox = Some("INBOX".into());
+        model.selected_envelope_ids.insert("1".into());
+        press(&mut model, KeyCode::Esc, KeyModifiers::NONE);
+
+        assert!(model.selected_envelope_ids.is_empty());
+        assert!(model.running);
+        assert_eq!(
+            model.selected_mailbox.as_deref(),
+            Some("INBOX"),
+            "Esc with a selection must only clear the selection"
+        );
+    }
+
+    #[test]
+    fn envelope_reload_clears_selection() {
+        let mut model = model_with_envelopes(&["1"]);
+        model.selected_mailbox = Some("INBOX".into());
+        model.selected_envelope_ids.insert("1".into());
+        apply_all(&mut model, Some(Message::LoadEnvelopes));
+
+        assert!(model.selected_envelope_ids.is_empty());
+    }
+
+    #[test]
+    fn paging_reset_clears_selection() {
+        let mut model = model_with_envelopes(&["1"]);
+        model.selected_envelope_ids.insert("1".into());
+        reset_envelope_paging(&mut model);
+
+        assert!(model.selected_envelope_ids.is_empty());
+    }
+
+    #[test]
+    fn removing_moved_ids_drops_their_rows_and_clamps_the_cursor() {
+        let mut model = model_with_envelopes(&["1", "2", "3"]);
+        model.envelope_index = 2;
+        model.selected_envelope_ids.insert("1".into());
+        model.selected_envelope_ids.insert("3".into());
+        remove_envelopes_by_id(&mut model, &["1".into(), "3".into()]);
+
+        assert_eq!(model.envelopes.len(), 1);
+        assert_eq!(model.envelopes[0].id, "2");
+        assert_eq!(model.envelope_index, 0);
+        assert!(
+            model.selected_envelope_ids.is_empty(),
+            "removed rows must leave the selection too"
+        );
+    }
+
+    #[test]
+    fn bulk_flagging_updates_every_targeted_row() {
+        let mut model = model_with_envelopes(&["1", "2", "3"]);
+        let flag = Flag::from_iana(IanaFlag::Seen);
+        let targets = ["1".to_string(), "3".to_string()];
+
+        set_flag_on_envelopes(&mut model, &targets, flag.clone(), FlagOp::Add);
+        assert!(model.envelopes[0].flags.contains(&flag));
+        assert!(!model.envelopes[1].flags.contains(&flag));
+        assert!(model.envelopes[2].flags.contains(&flag));
+
+        set_flag_on_envelopes(&mut model, &targets, flag.clone(), FlagOp::Remove);
+        assert!(model.envelopes.iter().all(|e| !e.flags.contains(&flag)));
+    }
+
+    #[test]
+    fn failed_bulk_op_keeps_the_selection_and_reports_the_error() {
+        let mut model = model_with_envelopes(&["1", "2"]);
+        model.selected_mailbox = Some("INBOX".into());
+        model.mailboxes.push(Mailbox {
+            id: "Archive".into(),
+            name: "Archive".into(),
+            unread: None,
+            total: None,
+        });
+        model.selected_envelope_ids.insert("1".into());
+        model.selected_envelope_ids.insert("2".into());
+        open_dialog(&mut model, Dialog::MoveTo);
+
+        apply_all(&mut model, Some(Message::DialogConfirm));
+
+        // The backend-less client cannot move, so the rows and the
+        // selection must survive the failed call untouched.
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.starts_with("Error")),
+            "expected a move error status, got {:?}",
+            model.status_message
+        );
+        assert_eq!(model.envelopes.len(), 2);
+        assert_eq!(model.selection_count(), 2);
     }
 }

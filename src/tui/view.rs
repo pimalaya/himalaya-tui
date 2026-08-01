@@ -22,7 +22,10 @@ use crate::{
     },
     tui::{
         command,
-        model::{BottomPanel, Dialog, FlagAction, Keybinds, MAILBOX_DIALOG_VISIBLE, Model, Panel},
+        model::{
+            BottomPanel, Dialog, FlagAction, Keybinds, MAILBOX_DIALOG_VISIBLE, Model, Panel,
+            format_message_count,
+        },
         palette,
         theme::Theme,
     },
@@ -169,14 +172,18 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
         .envelopes
         .iter()
         .map(|envelope| {
-            let style = if envelope.flags.contains(&Flag::from_iana(IanaFlag::Seen)) {
+            let is_selected = model.is_selected(envelope);
+            let style = if is_selected {
+                model.theme.mailbox_current
+            } else if envelope.flags.contains(&Flag::from_iana(IanaFlag::Seen)) {
                 model.theme.envelope_seen
             } else {
                 model.theme.envelope_unread
             };
+            let marker = if is_selected { "▌ " } else { "  " };
 
             let cells = vec![
-                Cell::from(format_flags(envelope)),
+                Cell::from(format!("{marker}{}", format_flags(envelope))),
                 Cell::from(envelope.subject.clone()),
                 Cell::from(truncate(&format_from(envelope), 20)),
                 Cell::from(truncate(&format_date(envelope), 6)),
@@ -186,9 +193,14 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
         })
         .collect();
 
+    let selection_badge = if model.has_selection() {
+        format!(" — {} selected", model.selection_count())
+    } else {
+        String::new()
+    };
     let block = Block::default()
         .title(format!(
-            " Envelopes{} ",
+            " Envelopes{}{} ",
             model
                 .selected_mailbox_name()
                 .map(|m| {
@@ -199,7 +211,8 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
                         None => format!(" - {m} ({page})"),
                     }
                 })
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            selection_badge
         ))
         .borders(Borders::ALL)
         .border_style(get_border_style(model, Panel::Envelopes));
@@ -376,23 +389,43 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
         Some(dialog @ (Dialog::Envelope | Dialog::Compose)) => {
             render_command_dialog(frame, model, dialog)
         }
-        Some(Dialog::CopyTo) => render_mailbox_dialog(frame, model, " Copy to "),
-        Some(Dialog::MoveTo) => render_mailbox_dialog(frame, model, " Move to "),
-        Some(dialog @ (Dialog::FlagAdd | Dialog::FlagRemove)) => {
-            let title = if dialog == Dialog::FlagAdd {
-                " Add Flag "
+        Some(dialog @ (Dialog::CopyTo | Dialog::MoveTo)) => {
+            let verb = if dialog == Dialog::CopyTo {
+                "Copy"
             } else {
-                " Remove Flag "
+                "Move"
+            };
+            render_mailbox_dialog(frame, model, &transfer_dialog_title(model, verb));
+        }
+        Some(dialog @ (Dialog::FlagAdd | Dialog::FlagRemove)) => {
+            let base = if dialog == Dialog::FlagAdd {
+                "Add Flag"
+            } else {
+                "Remove Flag"
             };
             render_dialog(
                 frame,
                 &model.theme,
                 model.dialog_index,
-                title,
+                &flag_dialog_title(model, base),
                 &FlagAction::ALL.map(|a| (a.label(), String::new())),
             );
         }
         None => {}
+    }
+}
+
+fn transfer_dialog_title(model: &Model, verb: &str) -> String {
+    match model.bulk_target_count() {
+        0 | 1 => format!(" {verb} to "),
+        count => format!(" {verb} {} to ", format_message_count(count)),
+    }
+}
+
+fn flag_dialog_title(model: &Model, base: &str) -> String {
+    match model.bulk_target_count() {
+        0 | 1 => format!(" {base} "),
+        count => format!(" {base} ({}) ", format_message_count(count)),
     }
 }
 

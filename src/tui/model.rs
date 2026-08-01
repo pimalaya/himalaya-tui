@@ -2,7 +2,10 @@
 //! the [`Message`] enum naming each transition. Mutation happens in
 //! [`crate::tui::update`]; rendering in [`crate::tui::view`].
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 use clap::ValueEnum;
 use edtui::{EditorEventHandler, EditorState};
@@ -50,6 +53,9 @@ pub struct Model {
     pub envelope_page: usize,
     pub envelope_page_size: usize,
     pub envelope_total: Option<u64>,
+    /// Ids of multi-selected envelopes. Always a subset of the visible
+    /// page: every envelope-list reload clears it.
+    pub selected_envelope_ids: HashSet<String>,
     pub selected_mailbox: Option<String>,
     pub account_name: String,
     pub from: Option<String>,
@@ -81,6 +87,45 @@ pub struct Model {
 impl Model {
     pub fn selected_envelope(&self) -> Option<&Envelope> {
         self.envelopes.get(self.envelope_index)
+    }
+
+    pub fn is_selected(&self, envelope: &Envelope) -> bool {
+        self.selected_envelope_ids.contains(&envelope.id)
+    }
+
+    pub fn has_selection(&self) -> bool {
+        !self.selected_envelope_ids.is_empty()
+    }
+
+    pub fn selection_count(&self) -> usize {
+        self.selected_envelope_ids.len()
+    }
+
+    /// Length of [`Self::bulk_target_ids`] without allocating it;
+    /// safe per the subset invariant on `selected_envelope_ids`.
+    pub fn bulk_target_count(&self) -> usize {
+        if self.has_selection() {
+            self.selection_count()
+        } else {
+            usize::from(self.selected_envelope().is_some())
+        }
+    }
+
+    /// Ids a bulk operation targets: the selection when one exists
+    /// (in visible page order), otherwise the hovered envelope.
+    pub fn bulk_target_ids(&self) -> Vec<String> {
+        if self.has_selection() {
+            self.envelopes
+                .iter()
+                .filter(|e| self.is_selected(e))
+                .map(|e| e.id.clone())
+                .collect()
+        } else {
+            self.selected_envelope()
+                .map(|e| e.id.clone())
+                .into_iter()
+                .collect()
+        }
     }
 
     pub fn mailbox_name(&self, id: &str) -> Option<&str> {
@@ -141,6 +186,14 @@ impl Model {
     }
 }
 
+pub fn format_message_count(count: usize) -> String {
+    if count == 1 {
+        "1 message".to_string()
+    } else {
+        format!("{count} messages")
+    }
+}
+
 impl Model {
     /// A blank, running model over the given client; callers layer
     /// their own fields on via struct-update syntax.
@@ -159,6 +212,7 @@ impl Model {
             envelope_page: 0,
             envelope_page_size: DEFAULT_ENVELOPE_PAGE_SIZE,
             envelope_total: None,
+            selected_envelope_ids: HashSet::new(),
             selected_mailbox: None,
             account_name: String::new(),
             from: None,
@@ -333,6 +387,10 @@ pub enum Message {
 
     LoadMailboxes,
     LoadEnvelopes,
+    ToggleSelectHovered,
+    SelectAllVisible,
+    InvertSelectionVisible,
+    ClearSelection,
     ReadSelected,
     StartReplyToSelected {
         reply_all: bool,
@@ -378,5 +436,42 @@ mod tests {
     fn full_page_with_unknown_total_can_advance() {
         assert!(can_advance_page(0, None, true));
         assert!(!can_advance_page(0, None, false));
+    }
+
+    #[test]
+    fn bulk_targets_fall_back_to_the_hovered_envelope() {
+        let model = Model {
+            envelopes: vec![Envelope::stub_with_id("1"), Envelope::stub_with_id("2")],
+            envelope_index: 1,
+            ..Model::default()
+        };
+
+        assert_eq!(model.bulk_target_ids(), vec!["2".to_string()]);
+    }
+
+    #[test]
+    fn bulk_targets_use_the_selection_in_page_order() {
+        let mut model = Model {
+            envelopes: vec![
+                Envelope::stub_with_id("1"),
+                Envelope::stub_with_id("2"),
+                Envelope::stub_with_id("3"),
+            ],
+            ..Model::default()
+        };
+        model.selected_envelope_ids.insert("3".into());
+        model.selected_envelope_ids.insert("1".into());
+
+        assert_eq!(
+            model.bulk_target_ids(),
+            vec!["1".to_string(), "3".to_string()]
+        );
+    }
+
+    #[test]
+    fn bulk_targets_are_empty_without_envelopes() {
+        let model = Model::default();
+
+        assert!(model.bulk_target_ids().is_empty());
     }
 }

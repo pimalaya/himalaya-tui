@@ -164,6 +164,46 @@ pub const COMMANDS: &[Command] = &[
         arg: Some(remove_flag_candidates),
     },
     Command {
+        id: "select-toggle",
+        name: "Toggle selection",
+        aliases: &["mark", "select"],
+        bindings: &[plain(' ')],
+        context: CommandContext::Envelope,
+        is_available: has_selected_envelope,
+        message: || Message::ToggleSelectHovered,
+        arg: None,
+    },
+    Command {
+        id: "select-all",
+        name: "Select all",
+        aliases: &["mark-all"],
+        bindings: &[chord(None, KeyModifiers::CONTROL, 'a')],
+        context: CommandContext::Envelope,
+        is_available: has_selected_envelope,
+        message: || Message::SelectAllVisible,
+        arg: None,
+    },
+    Command {
+        id: "select-invert",
+        name: "Invert selection",
+        aliases: &["toggle-all"],
+        bindings: &[chord(None, KeyModifiers::CONTROL, 'r')],
+        context: CommandContext::Envelope,
+        is_available: has_selected_envelope,
+        message: || Message::InvertSelectionVisible,
+        arg: None,
+    },
+    Command {
+        id: "select-clear",
+        name: "Clear selection",
+        aliases: &["unmark", "deselect"],
+        bindings: &[],
+        context: CommandContext::Envelope,
+        is_available: Model::has_selection,
+        message: || Message::ClearSelection,
+        arg: None,
+    },
+    Command {
         id: "send",
         name: "Send",
         aliases: &[],
@@ -334,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn envelope_menu_preserves_previous_dialog_rows() {
+    fn envelope_menu_lists_registry_rows_in_order() {
         assert_eq!(
             labels(CommandContext::Envelope),
             [
@@ -345,7 +385,11 @@ mod tests {
                 "Copy",
                 "Move",
                 "Add flag",
-                "Remove flag"
+                "Remove flag",
+                "Toggle selection",
+                "Select all",
+                "Invert selection",
+                "Clear selection"
             ]
         );
     }
@@ -425,6 +469,17 @@ mod tests {
         assert!(!available(&model, CommandContext::Envelope));
 
         model.envelopes.push(Envelope::stub());
+        let unavailable: Vec<&str> = for_context(CommandContext::Envelope)
+            .filter(|c| !(c.is_available)(&model))
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(
+            unavailable,
+            ["select-clear"],
+            "clearing is the one envelope command that needs an existing selection"
+        );
+
+        model.selected_envelope_ids.insert("1".into());
         assert!(available(&model, CommandContext::Envelope));
     }
 

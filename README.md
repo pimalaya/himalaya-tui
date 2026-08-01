@@ -164,8 +164,16 @@ composer):
 | `f` | Forward |
 | `c`, `m` | Copy / Move to another mailbox |
 | `+`, `-` | Add / Remove flag |
+| `Space` | Toggle selection on the hovered envelope and advance |
+| `Ctrl-a` | Select every envelope on the visible page |
+| `Ctrl-r` | Invert the selection on the visible page |
 | `Ctrl-c` | Start a new draft |
 | `F5` | Reload mailboxes |
+
+With a selection active, Copy, Move and the flag commands apply to every
+selected envelope in one backend call; without one they act on the hovered
+envelope. `Esc` clears the selection first, and changing page or mailbox
+drops it.
 
 The command palette (`:`) lists every command with fuzzy search and its
 current keybind; `Enter` on an envelope still opens the same actions as a
@@ -180,7 +188,7 @@ Composer:
 
 The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) selects the keybinding flavor: the in-app composer's edtui keybinds and the flavor-scoped command keys (paging, above). In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
 
-Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag.
+Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag, Toggle selection, Select all, Invert selection, Clear selection.
 
 ### Composing messages
 

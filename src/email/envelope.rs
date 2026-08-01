@@ -88,6 +88,13 @@ pub fn normalize_message_id(raw: &str) -> Option<String> {
 
 #[cfg(test)]
 impl Envelope {
+    pub(crate) fn stub_with_id(id: &str) -> Self {
+        Self {
+            id: id.into(),
+            ..Self::stub()
+        }
+    }
+
     /// Minimal valid envelope fixture.
     pub(crate) fn stub() -> Self {
         Self {
