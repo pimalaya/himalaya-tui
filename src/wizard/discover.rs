@@ -2,7 +2,15 @@
 //!
 //! Flow:
 //!
-//! 1. Ask once for an email address, a server URL or a bare domain.
+//! Unlike the himalaya CLI wizard, which runs every discovery method in
+//! parallel and prints a config the user copies into their config file,
+//! the TUI probes methods in series (first hit wins, below) and returns
+//! a ready-to-use in-memory [`AccountConfig`] for the running session.
+//! The prompts are deliberately kept identical to the CLI: same
+//! email/server/folder entry, same SASL and HTTP authentication
+//! selection.
+//!
+//! 1. Ask once for an email address, a server URL or a local folder path.
 //! 2. If the input is a `file://` URL: validate the Maildir root, ask
 //!    for the `From:` address, done.
 //! 3. If the input is another URL: scheme picks the protocol; host,
@@ -15,11 +23,11 @@
 //!    IMAP+SMTP pair.
 //! 5. Ask straight for the SASL (IMAP/SMTP) or HTTP (JMAP)
 //!    authentication mechanism and only the parameters that mechanism
-//!    needs.
-//! 6. Open a live connection. The plaintext secret materialises in
-//!    memory only for that handshake; the on-disk config keeps the
-//!    raw value (typed via a masked single prompt).
-//! 7. Write the config.
+//!    needs, mirroring the CLI wizard's selection.
+//! 6. Return the assembled [`AccountConfig`]. Nothing is written to
+//!    disk; the secret is kept in a `secrecy` wrapper ([`Secret::Raw`]),
+//!    typed via a single masked prompt with no confirmation. The live
+//!    connection is opened later by the caller from this config.
 
 use std::path::PathBuf;
 
@@ -76,7 +84,7 @@ impl DiscoveryResult {
 }
 
 pub fn run(from: Option<&str>) -> Result<AccountConfig> {
-    let input = prompt::text::<&str>("Email address, server URL or domain:", None)?;
+    let input = prompt::text::<&str>("Email, server or folder path:", None)?;
     run_with_input(input.trim(), from)
 }
 
@@ -323,42 +331,54 @@ fn discover(local_part: Option<&str>, domain: &str) -> DiscoveryResult {
 
 // ── SASL (IMAP/SMTP) ────────────────────────────────────────────────────────
 
-const SASL_MECHANISMS: [&str; 6] = [
-    "PLAIN",
-    "LOGIN",
-    "XOAUTH2",
-    "OAUTHBEARER",
-    "SCRAM-SHA-256",
-    "ANONYMOUS",
-];
+// The SASL mechanisms split by credential kind: a password family
+// (login + password), a token family (login + API token) and ANONYMOUS
+// (no credentials). Labels, order and prompts are kept identical to the
+// himalaya CLI wizard (`wizard::imap_smtp::prompt_sasl`) so both
+// front-ends select auth the same way. The TUI's series discovery
+// advertises no auth capabilities, so every mechanism is always offered,
+// matching the CLI's "none advertised" branch.
+const PLAIN: &str = "PLAIN (login + password)";
+const LOGIN: &str = "LOGIN (login + password)";
+const SCRAM_SHA_256: &str = "SCRAM-SHA-256 (login + password)";
+const ANONYMOUS: &str = "ANONYMOUS (no credentials)";
+const OAUTHBEARER: &str = "OAUTHBEARER (login + API token)";
+const XOAUTH2: &str = "XOAUTH2 (login + API token)";
+
+const SASL_MECHANISMS: [&str; 6] = [PLAIN, LOGIN, SCRAM_SHA_256, ANONYMOUS, OAUTHBEARER, XOAUTH2];
 
 fn prompt_sasl(email: Option<&str>) -> Result<SaslConfig> {
-    let mechanism = prompt::item("SASL mechanism:", SASL_MECHANISMS, Some("PLAIN"))?;
+    let mechanism = prompt::item("SASL mechanism:", SASL_MECHANISMS, None)?;
+
+    // ANONYMOUS carries no login; every other mechanism needs one.
+    if mechanism == ANONYMOUS {
+        let message = prompt::some_text::<&str>("ANONYMOUS message (optional):", None)?;
+        return Ok(SaslConfig::Anonymous(SaslAnonymousConfig { message }));
+    }
+
+    let login = prompt::text("Login:", email)?;
 
     Ok(match mechanism {
-        "PLAIN" => SaslConfig::Plain(SaslPlainConfig {
+        PLAIN => SaslConfig::Plain(SaslPlainConfig {
             authzid: None,
-            authcid: prompt::text("Login:", email)?,
+            authcid: login,
             passwd: prompt_raw_secret("Password")?,
         }),
-        "LOGIN" => SaslConfig::Login(SaslLoginConfig {
-            username: prompt::text("Username:", email)?,
+        LOGIN => SaslConfig::Login(SaslLoginConfig {
+            username: login,
             password: prompt_raw_secret("Password")?,
         }),
-        "XOAUTH2" => SaslConfig::Xoauth2(SaslXoauth2Config {
-            username: prompt::text("Username:", email)?,
-            token: prompt_raw_secret("Access token")?,
-        }),
-        "OAUTHBEARER" => SaslConfig::Oauthbearer(SaslOauthbearerConfig {
-            username: prompt::text("Username:", email)?,
-            token: prompt_raw_secret("Access token")?,
-        }),
-        "SCRAM-SHA-256" => SaslConfig::ScramSha256(SaslScramSha256Config {
-            username: prompt::text("Username:", email)?,
+        SCRAM_SHA_256 => SaslConfig::ScramSha256(SaslScramSha256Config {
+            username: login,
             password: prompt_raw_secret("Password")?,
         }),
-        "ANONYMOUS" => SaslConfig::Anonymous(SaslAnonymousConfig {
-            message: prompt::some_text::<&str>("Anonymous message (optional):", None)?,
+        OAUTHBEARER => SaslConfig::Oauthbearer(SaslOauthbearerConfig {
+            username: login,
+            token: prompt_raw_secret("API token")?,
+        }),
+        XOAUTH2 => SaslConfig::Xoauth2(SaslXoauth2Config {
+            username: login,
+            token: prompt_raw_secret("API token")?,
         }),
         _ => unreachable!(),
     })
@@ -366,18 +386,23 @@ fn prompt_sasl(email: Option<&str>) -> Result<SaslConfig> {
 
 // ── JMAP HTTP auth ──────────────────────────────────────────────────────────
 
-const JMAP_AUTHS: [&str; 2] = ["Basic", "Bearer"];
+// The JMAP HTTP authentication schemes, kept identical to the himalaya
+// CLI wizard (`wizard::jmap::prompt_auth`); both schemes are always
+// offered since the TUI discovery advertises no capabilities.
+const JMAP_BASIC: &str = "Basic (login + password)";
+const JMAP_BEARER: &str = "Bearer (API token)";
+const JMAP_AUTHS: [&str; 2] = [JMAP_BASIC, JMAP_BEARER];
 
 fn prompt_jmap_auth(email: Option<&str>) -> Result<JmapAuthConfig> {
-    let strategy = prompt::item("HTTP auth:", JMAP_AUTHS, Some("Basic"))?;
+    let scheme = prompt::item("JMAP authentication:", JMAP_AUTHS, None)?;
 
-    Ok(match strategy {
-        "Basic" => JmapAuthConfig::Basic {
-            username: prompt::text("Username:", email)?,
-            password: prompt_raw_secret("Password")?,
+    Ok(match scheme {
+        JMAP_BASIC => JmapAuthConfig::Basic {
+            username: prompt::text("Login:", email)?,
+            password: prompt_raw_secret("JMAP password")?,
         },
-        "Bearer" => JmapAuthConfig::Bearer {
-            token: prompt_raw_secret("Access token")?,
+        JMAP_BEARER => JmapAuthConfig::Bearer {
+            token: prompt_raw_secret("JMAP API token")?,
         },
         _ => unreachable!(),
     })

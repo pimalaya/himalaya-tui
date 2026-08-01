@@ -38,10 +38,9 @@ impl ImapClient {
                 // port_or_known_default() would silently drop the whole SASL
                 // config for a portless URL, opening an unauthenticated
                 // session.
-                let port =
-                    server
-                        .port()
-                        .unwrap_or(if server.scheme() == "imaps" { 993 } else { 143 });
+                let port = server
+                    .port()
+                    .unwrap_or_else(|| io_imap::client::default_port(server.scheme()));
                 cfg.try_into_sasl(host, port)
             })
             .transpose()?;

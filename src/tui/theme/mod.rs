@@ -6,7 +6,7 @@
 pub mod default;
 pub mod dracula_dark;
 pub mod one_light;
-pub mod tokyo_night;
 mod resolved;
+pub mod tokyo_night;
 
 pub use resolved::Theme;
