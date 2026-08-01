@@ -183,6 +183,36 @@ mod tests {
     }
 
     #[test]
+    fn switch_account_argument_dispatches_the_switch() {
+        let mut model = Model {
+            config_source: Some(Vec::new()),
+            account_names: vec!["personal".into(), "work".into()],
+            ..Model::default()
+        };
+        open_palette(&mut model);
+        type_filter(&mut model, "switch-account wo");
+
+        assert_eq!(listed_candidates(&model), ["work"]);
+        let confirmed = update(&mut model, PaletteMessage::Confirm);
+        assert!(
+            matches!(confirmed, Some(Message::SwitchAccount(ref name)) if name == "work"),
+            "expected SwitchAccount(work), got {confirmed:?}"
+        );
+    }
+
+    #[test]
+    fn switch_account_without_config_source_stays_in_command_mode() {
+        let mut model = Model {
+            account_names: vec!["work".into()],
+            ..Model::default()
+        };
+        open_palette(&mut model);
+        type_filter(&mut model, "switch-account work");
+
+        assert!(argument_query(&model).is_none());
+    }
+
+    #[test]
     fn confirm_on_bare_argument_command_opens_the_dialog() {
         let mut model = transfer_ready_model();
         open_palette(&mut model);

@@ -13,6 +13,7 @@ mod jmap;
 mod m2dir;
 #[cfg(feature = "maildir")]
 mod maildir;
+mod session;
 mod shared;
 #[cfg(feature = "smtp")]
 mod smtp;

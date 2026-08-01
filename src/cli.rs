@@ -25,7 +25,7 @@ use simplelog::WriteLogger;
 use crate::wizard;
 use crate::{
     config::{AccountConfig, Config, DEFAULT_PALETTE_KEY},
-    shared::client::EmailClient,
+    session::{self, SessionSource},
     tui::{
         model::{Keybinds, Message, Model},
         theme::Theme,
@@ -108,28 +108,18 @@ impl Cli {
             Config::from_paths_or_default(&self.config_paths)?
         };
 
-        let mut account_name = String::from("unspecified");
-        let mut display_name = None;
-        let mut signature = String::new();
-        let mut keybinds_config = None;
-        let mut palette_key = DEFAULT_PALETTE_KEY;
-        let mut theme = Theme::default();
-
-        let mut account = None;
+        let mut globals = TuiGlobals::default();
+        let mut configured_account = None;
         if let Some(mut config) = loaded {
-            display_name = config.display_name.take();
-            signature = config.signature.take().unwrap_or_default();
-            keybinds_config = config.keybinds.take();
-            palette_key = config.palette_key.take().unwrap_or(DEFAULT_PALETTE_KEY);
-            theme = Theme::resolve(&config.theme);
-            if let Some((name, cfg)) = config.take_account(self.account_or_server.as_deref())? {
-                account_name = name;
-                account = Some(cfg);
-            }
+            globals = take_globals(&mut config);
+            configured_account = config.take_account(self.account_or_server.as_deref())?;
         }
 
-        let mut account_config = match account {
-            Some(account) => account,
+        // `config_source` stays `None` for wizard-built accounts even
+        // when a config file exists: switching away from an in-memory
+        // account would lose it irrecoverably.
+        let (account_name, account, config_source) = match configured_account {
+            Some((name, account)) => (name, account, Some(self.config_paths.clone())),
             // No matching account (no config, or the config carries no
             // such account and no default): fall back to the wizard,
             // seeding it with the positional argument (an email, server
@@ -138,27 +128,27 @@ impl Cli {
                 spinner.clear();
                 let account = run_wizard(self.account_or_server.as_deref(), self.from.as_deref())?;
                 spinner = Spinner::start("Loading…");
-                account
+                (String::from("unspecified"), account, None)
             }
         };
 
-        let from = account_config.from.clone();
-        let from_name = account_config.from_name.take().or(display_name);
-        let signature = account_config.signature.take().unwrap_or(signature);
-        let keybinds = self.keybinds.or(keybinds_config).unwrap_or_default();
+        let session = SessionSource {
+            account_name,
+            account,
+            display_name: globals.display_name,
+            signature: globals.signature,
+            account_names: globals.account_names,
+        }
+        .open()?;
 
-        let client = EmailClient::new(account_config)?;
+        let keybinds = self.keybinds.or(globals.keybinds).unwrap_or_default();
 
         let mut model = Model {
-            account_name,
-            from,
-            from_name,
-            signature,
             editor_handler: keybinds.editor_handler(),
             keybinds,
-            palette_key,
-            theme,
-            ..Model::new(client)
+            palette_key: globals.palette_key,
+            theme: globals.theme,
+            ..Model::from_session(session, config_source)
         };
 
         if let Some(from) = self.from {
@@ -173,6 +163,41 @@ impl Cli {
         spinner.clear();
 
         Ok(model)
+    }
+}
+
+/// Top-level config fields consumed at startup: UI settings plus the
+/// global identity fallbacks handed to [`SessionSource`].
+struct TuiGlobals {
+    display_name: Option<String>,
+    signature: String,
+    keybinds: Option<Keybinds>,
+    palette_key: char,
+    theme: Theme,
+    account_names: Vec<String>,
+}
+
+impl Default for TuiGlobals {
+    fn default() -> Self {
+        Self {
+            display_name: None,
+            signature: String::new(),
+            keybinds: None,
+            palette_key: DEFAULT_PALETTE_KEY,
+            theme: Theme::default(),
+            account_names: Vec::new(),
+        }
+    }
+}
+
+fn take_globals(config: &mut Config) -> TuiGlobals {
+    TuiGlobals {
+        display_name: config.display_name.take(),
+        signature: config.signature.take().unwrap_or_default(),
+        keybinds: config.keybinds.take(),
+        palette_key: config.palette_key.take().unwrap_or(DEFAULT_PALETTE_KEY),
+        theme: Theme::resolve(&config.theme),
+        account_names: session::sorted_account_names(config),
     }
 }
 

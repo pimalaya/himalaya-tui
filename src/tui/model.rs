@@ -4,6 +4,7 @@
 
 use std::{
     collections::HashSet,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -19,6 +20,7 @@ use crate::{
         flag::{Flag, IanaFlag},
         mailbox::Mailbox,
     },
+    session::AccountSession,
     shared::client::EmailClient,
     tui::{
         command::{self, CommandContext},
@@ -58,6 +60,15 @@ pub struct Model {
     pub selected_envelope_ids: HashSet<String>,
     pub selected_mailbox: Option<String>,
     pub account_name: String,
+    /// Paths given via `--config`; empty means XDG discovery. `None`
+    /// when the session has no config source (`--no-config` or a
+    /// wizard-built account), which disables the account switcher.
+    pub config_source: Option<Vec<PathBuf>>,
+    /// Account names from the most recent config parse: the
+    /// switcher's palette candidates and dialog rows. Refreshed only
+    /// where the config is parsed anyway (startup, switcher open,
+    /// switch), because candidate sources must not perform I/O.
+    pub account_names: Vec<String>,
     pub from: Option<String>,
     pub from_name: Option<String>,
     pub signature: String,
@@ -95,6 +106,15 @@ impl Model {
 
     pub fn has_selection(&self) -> bool {
         !self.selected_envelope_ids.is_empty()
+    }
+
+    /// Whether the composer buffer is alive, including behind a
+    /// preview (previewing does not release the draft).
+    pub fn composer_active(&self) -> bool {
+        matches!(
+            self.bottom_panel,
+            BottomPanel::Compose | BottomPanel::MessagePreview
+        )
     }
 
     pub fn selection_count(&self) -> usize {
@@ -164,6 +184,7 @@ impl Model {
         }
         match dialog {
             Dialog::CopyTo | Dialog::MoveTo => self.filtered_mailboxes().len(),
+            Dialog::SwitchAccount => self.account_names.len(),
             _ => FlagAction::ALL.len(),
         }
     }
@@ -195,6 +216,21 @@ pub fn format_message_count(count: usize) -> String {
 }
 
 impl Model {
+    /// Every session-derived field in one place, so startup and the
+    /// account switcher cannot drift apart; UI settings stay at
+    /// their defaults for the caller to layer on.
+    pub fn from_session(session: AccountSession, config_source: Option<Vec<PathBuf>>) -> Self {
+        Self {
+            account_name: session.account_name,
+            from: session.from,
+            from_name: session.from_name,
+            signature: session.signature,
+            account_names: session.account_names,
+            config_source,
+            ..Self::new(session.client)
+        }
+    }
+
     /// A blank, running model over the given client; callers layer
     /// their own fields on via struct-update syntax.
     pub fn new(client: EmailClient) -> Self {
@@ -215,6 +251,8 @@ impl Model {
             selected_envelope_ids: HashSet::new(),
             selected_mailbox: None,
             account_name: String::new(),
+            config_source: None,
+            account_names: Vec::new(),
             from: None,
             from_name: None,
             signature: String::new(),
@@ -290,16 +328,21 @@ pub enum Dialog {
     MoveTo,
     FlagAdd,
     FlagRemove,
+    SwitchAccount,
 }
 
 impl Dialog {
     /// The registry context backing this dialog's rows; `None` for
-    /// the parameter pickers (mailbox and flag dialogs).
+    /// the parameter pickers (mailbox, flag and account dialogs).
     pub fn command_context(self) -> Option<CommandContext> {
         match self {
             Dialog::Envelope => Some(CommandContext::Envelope),
             Dialog::Compose => Some(CommandContext::Composer),
-            Dialog::CopyTo | Dialog::MoveTo | Dialog::FlagAdd | Dialog::FlagRemove => None,
+            Dialog::CopyTo
+            | Dialog::MoveTo
+            | Dialog::FlagAdd
+            | Dialog::FlagRemove
+            | Dialog::SwitchAccount => None,
         }
     }
 }
@@ -404,6 +447,12 @@ pub enum Message {
         add: bool,
         action: FlagAction,
     },
+    /// Re-parses the config, refreshes [`Model::account_names`] and
+    /// opens [`Dialog::SwitchAccount`].
+    OpenAccountSwitcher,
+    /// Tears down the session and reconnects as the named account,
+    /// re-parsing the config at switch time.
+    SwitchAccount(String),
     SendCompose,
     PreviewCompose,
     SaveComposeToDrafts,

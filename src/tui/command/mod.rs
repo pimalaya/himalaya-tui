@@ -6,7 +6,7 @@
 
 mod registry;
 
-pub use registry::COMMANDS;
+pub use registry::{COMMANDS, switch_account_candidates};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

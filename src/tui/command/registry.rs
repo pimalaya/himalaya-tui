@@ -1,7 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 use super::{Candidate, Command, CommandContext, KeyBinding};
-use crate::tui::model::{BottomPanel, Dialog, FlagAction, Keybinds, Message, Model, Panel};
+use crate::tui::model::{Dialog, FlagAction, Keybinds, Message, Model, Panel};
 
 const fn key(code: KeyCode) -> KeyBinding {
     KeyBinding {
@@ -29,13 +29,6 @@ fn always(_: &Model) -> bool {
 
 fn has_selected_envelope(model: &Model) -> bool {
     model.selected_envelope().is_some()
-}
-
-fn composer_active(model: &Model) -> bool {
-    matches!(
-        model.bottom_panel,
-        BottomPanel::Compose | BottomPanel::MessagePreview
-    )
 }
 
 fn envelopes_focused(model: &Model) -> bool {
@@ -80,6 +73,23 @@ fn add_flag_candidates(_: &Model) -> Vec<Candidate> {
 
 fn remove_flag_candidates(_: &Model) -> Vec<Candidate> {
     flag_candidates(false)
+}
+
+fn has_config_source(model: &Model) -> bool {
+    model.config_source.is_some()
+}
+
+/// Shared by the palette's argument mode and the SwitchAccount
+/// dialog's confirm, so both dispatch identical messages.
+pub fn switch_account_candidates(model: &Model) -> Vec<Candidate> {
+    model
+        .account_names
+        .iter()
+        .map(|name| Candidate {
+            label: name.clone(),
+            message: Message::SwitchAccount(name.clone()),
+        })
+        .collect()
 }
 
 pub const COMMANDS: &[Command] = &[
@@ -209,7 +219,7 @@ pub const COMMANDS: &[Command] = &[
         aliases: &[],
         bindings: &[],
         context: CommandContext::Composer,
-        is_available: composer_active,
+        is_available: Model::composer_active,
         message: || Message::SendCompose,
         arg: None,
     },
@@ -219,7 +229,7 @@ pub const COMMANDS: &[Command] = &[
         aliases: &[],
         bindings: &[],
         context: CommandContext::Composer,
-        is_available: composer_active,
+        is_available: Model::composer_active,
         message: || Message::PreviewCompose,
         arg: None,
     },
@@ -229,7 +239,7 @@ pub const COMMANDS: &[Command] = &[
         aliases: &["draft"],
         bindings: &[],
         context: CommandContext::Composer,
-        is_available: composer_active,
+        is_available: Model::composer_active,
         message: || Message::SaveComposeToDrafts,
         arg: None,
     },
@@ -239,7 +249,7 @@ pub const COMMANDS: &[Command] = &[
         aliases: &["discard"],
         bindings: &[],
         context: CommandContext::Composer,
-        is_available: composer_active,
+        is_available: Model::composer_active,
         message: || Message::CancelCompose,
         arg: None,
     },
@@ -292,6 +302,16 @@ pub const COMMANDS: &[Command] = &[
         arg: None,
     },
     Command {
+        id: "switch-account",
+        name: "Switch account",
+        aliases: &[],
+        bindings: &[plain(';')],
+        context: CommandContext::Global,
+        is_available: has_config_source,
+        message: || Message::OpenAccountSwitcher,
+        arg: Some(switch_account_candidates),
+    },
+    Command {
         id: "quit",
         name: "Quit",
         aliases: &["exit"],
@@ -313,6 +333,7 @@ mod tests {
         email::envelope::Envelope,
         tui::{
             command::for_context,
+            model::BottomPanel,
             update::{CTRL_ALIASES, PLAIN_ALIASES},
         },
     };
@@ -510,6 +531,32 @@ mod tests {
         assert!(!paging_available(&model));
         model.active_panel = Panel::Envelopes;
         assert!(paging_available(&model));
+    }
+
+    #[test]
+    fn switch_account_requires_a_config_source() {
+        let mut model = Model::default();
+        assert!(!(by_id("switch-account").is_available)(&model));
+
+        model.config_source = Some(Vec::new());
+        assert!((by_id("switch-account").is_available)(&model));
+    }
+
+    #[test]
+    fn switch_account_candidates_dispatch_their_account_name() {
+        let model = Model {
+            account_names: vec!["personal".into(), "work".into()],
+            ..Model::default()
+        };
+
+        let candidates = switch_account_candidates(&model);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[1].label, "work");
+        assert!(
+            matches!(&candidates[1].message, Message::SwitchAccount(name) if name == "work"),
+            "a candidate must dispatch its own account name"
+        );
     }
 
     #[test]

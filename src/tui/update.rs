@@ -27,6 +27,7 @@ use crate::{
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
+    session::{self, AccountSession},
     tui::{
         command::{self, Command, KeyBinding},
         model::{
@@ -179,6 +180,14 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         }
         Message::FlagSelected { add, action } => {
             do_flag(model, add, action);
+            None
+        }
+        Message::OpenAccountSwitcher => {
+            open_account_switcher(model);
+            None
+        }
+        Message::SwitchAccount(account) => {
+            switch_account(model, &account);
             None
         }
         Message::SendCompose => {
@@ -550,7 +559,17 @@ fn dialog_confirm(model: &mut Model) -> Option<Message> {
         Dialog::MoveTo => transfer_target(model).map(Message::MoveSelectedTo),
         Dialog::FlagAdd => confirm_flag(model, true),
         Dialog::FlagRemove => confirm_flag(model, false),
+        Dialog::SwitchAccount => confirm_switch_account(model),
     }
+}
+
+fn confirm_switch_account(model: &mut Model) -> Option<Message> {
+    let confirmed = command::switch_account_candidates(model)
+        .into_iter()
+        .nth(model.dialog_index)
+        .map(|candidate| candidate.message);
+    close_dialog(model);
+    confirmed
 }
 
 // The picker dialogs close here, not in the transfer/flag handlers:
@@ -845,6 +864,59 @@ fn do_flag(model: &mut Model, add: bool, action: FlagAction) {
         }
         Err(e) => set_status(model, format!("Error: {e}")),
     }
+}
+
+fn open_account_switcher(model: &mut Model) {
+    let Some(paths) = model.config_source.clone() else {
+        return;
+    };
+    match session::config_account_names(&paths) {
+        Ok(names) => {
+            model.account_names = names;
+            open_dialog(model, Dialog::SwitchAccount);
+        }
+        Err(err) => set_status(model, format!("Error: {err}")),
+    }
+}
+
+/// Re-parses the config and reconnects, even for the active account
+/// (mid-session config edits are picked up on any switch). The new
+/// session is built before the current one is touched, so a failed
+/// switch leaves the session intact.
+fn switch_account(model: &mut Model, account: &str) {
+    if model.composer_active() {
+        set_status(
+            model,
+            "Send, save or cancel the open draft before switching accounts",
+        );
+        return;
+    }
+    let Some(paths) = model.config_source.clone() else {
+        return;
+    };
+    match session::open_account_session(&paths, Some(account)) {
+        Ok(new_session) => {
+            rebuild_session(model, new_session);
+            apply_all(model, Some(Message::Initialize));
+            if model.status_message.is_none() {
+                set_status(model, format!("Switched to {}", model.account_name));
+            }
+        }
+        Err(err) => set_status(model, format!("Error: {err}")),
+    }
+}
+
+/// Wholesale rebuild around the new session: only session-independent
+/// UI settings survive.
+fn rebuild_session(model: &mut Model, new_session: AccountSession) {
+    let config_source = model.config_source.take();
+    *model = Model {
+        editor_handler: model.keybinds.editor_handler(),
+        keybinds: model.keybinds,
+        palette_key: model.palette_key,
+        theme: model.theme,
+        ..Model::from_session(new_session, config_source)
+    };
 }
 
 fn do_send(model: &mut Model) {
@@ -1177,6 +1249,134 @@ mod tests {
 
         set_flag_on_envelopes(&mut model, &targets, flag.clone(), FlagOp::Remove);
         assert!(model.envelopes.iter().all(|e| !e.flags.contains(&flag)));
+    }
+
+    fn missing_config_path() -> std::path::PathBuf {
+        std::env::temp_dir().join("himalaya-tui-missing-config.toml")
+    }
+
+    /// A model whose config source points at a file that does not
+    /// exist, so any dispatched switch fails deterministically.
+    fn switcher_model() -> Model {
+        Model {
+            account_name: "work".into(),
+            config_source: Some(vec![missing_config_path()]),
+            account_names: vec!["personal".into(), "work".into()],
+            ..Model::default()
+        }
+    }
+
+    #[test]
+    fn switch_is_refused_while_a_draft_is_open() {
+        let mut model = switcher_model();
+        model.bottom_panel = BottomPanel::Compose;
+
+        apply_all(&mut model, Some(Message::SwitchAccount("personal".into())));
+
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.contains("draft")),
+            "expected the draft guard status, got {:?}",
+            model.status_message
+        );
+        assert_eq!(model.bottom_panel, BottomPanel::Compose);
+        assert_eq!(model.account_name, "work");
+    }
+
+    #[test]
+    fn failed_switch_keeps_the_current_session() {
+        let mut model = switcher_model();
+
+        apply_all(&mut model, Some(Message::SwitchAccount("personal".into())));
+
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.starts_with("Error")),
+            "expected a switch error status, got {:?}",
+            model.status_message
+        );
+        assert_eq!(model.account_name, "work");
+        assert_eq!(
+            model.account_names.len(),
+            2,
+            "the candidate cache must survive a failed switch"
+        );
+    }
+
+    #[test]
+    fn switch_dialog_confirm_dispatches_the_selected_candidate() {
+        let mut model = switcher_model();
+        open_dialog(&mut model, Dialog::SwitchAccount);
+        apply_all(&mut model, Some(Message::DialogNext));
+
+        apply_all(&mut model, Some(Message::DialogConfirm));
+
+        // The missing config makes the dispatched switch fail, which
+        // proves confirm resolved the row to SwitchAccount.
+        assert!(model.dialog.is_none());
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.starts_with("Error")),
+            "expected a switch error status, got {:?}",
+            model.status_message
+        );
+    }
+
+    #[test]
+    fn open_switcher_without_config_source_does_nothing() {
+        let mut model = Model::default();
+
+        apply_all(&mut model, Some(Message::OpenAccountSwitcher));
+
+        assert!(model.dialog.is_none());
+        assert!(model.status_message.is_none());
+    }
+
+    #[cfg(feature = "maildir")]
+    #[test]
+    fn switch_rebuilds_the_session_and_carries_ui_settings() -> anyhow::Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "himalaya-tui-switch-rebuild-test-{}",
+            std::process::id()
+        ));
+        let mail_root = base.join("mail");
+        std::fs::create_dir_all(&mail_root)?;
+        let config_path = base.join("config.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "[accounts.first]\ndefault = true\nmaildir.root = \"{root}\"\n\n\
+                 [accounts.second]\nmaildir.root = \"{root}\"\n",
+                root = mail_root.display()
+            ),
+        )?;
+
+        let mut model = Model {
+            account_name: "first".into(),
+            config_source: Some(vec![config_path]),
+            palette_key: ';',
+            ..Model::default()
+        };
+
+        apply_all(&mut model, Some(Message::SwitchAccount("second".into())));
+
+        assert_eq!(model.account_name, "second");
+        assert_eq!(
+            model.palette_key, ';',
+            "UI settings must survive the rebuild"
+        );
+        assert_eq!(model.account_names, ["first", "second"]);
+        assert_eq!(model.status_message.as_deref(), Some("Switched to second"));
+        assert!(model.config_source.is_some());
+
+        std::fs::remove_dir_all(&base)?;
+        Ok(())
     }
 
     #[test]

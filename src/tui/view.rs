@@ -411,8 +411,33 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
                 &FlagAction::ALL.map(|a| (a.label(), String::new())),
             );
         }
+        Some(Dialog::SwitchAccount) => render_switch_account_dialog(frame, model),
         None => {}
     }
+}
+
+/// Rows mirror `switch_account_candidates` 1:1 (both read
+/// `account_names`); the hint column marks the active account.
+fn render_switch_account_dialog(frame: &mut Frame, model: &Model) {
+    let rows: Vec<(&str, String)> = model
+        .account_names
+        .iter()
+        .map(|name| {
+            let hint = if *name == model.account_name {
+                String::from("current")
+            } else {
+                String::new()
+            };
+            (name.as_str(), hint)
+        })
+        .collect();
+    render_dialog(
+        frame,
+        &model.theme,
+        model.dialog_index,
+        " Switch Account ",
+        &rows,
+    );
 }
 
 fn transfer_dialog_title(model: &Model, verb: &str) -> String {

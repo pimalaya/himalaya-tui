@@ -169,6 +169,7 @@ composer):
 | `Ctrl-r` | Invert the selection on the visible page |
 | `Ctrl-c` | Start a new draft |
 | `F5` | Reload mailboxes |
+| `;` | Switch account (dialog, or `:switch-account <name>` in the palette) |
 
 With a selection active, Copy, Move and the flag commands apply to every
 selected envelope in one backend call; without one they act on the hovered
