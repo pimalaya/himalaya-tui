@@ -150,16 +150,16 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             fetch_for_forward(model);
             None
         }
-        Message::CopySelectedToTarget => {
-            do_copy(model);
+        Message::CopySelectedTo(target_id) => {
+            do_transfer(model, &target_id, false);
             None
         }
-        Message::MoveSelectedToTarget => {
-            do_move(model);
+        Message::MoveSelectedTo(target_id) => {
+            do_transfer(model, &target_id, true);
             None
         }
-        Message::FlagSelected { add } => {
-            do_flag(model, add);
+        Message::FlagSelected { add, action } => {
+            do_flag(model, add, action);
             None
         }
         Message::SendCompose => {
@@ -494,11 +494,29 @@ fn dialog_confirm(model: &mut Model) -> Option<Message> {
         }
         // Stays open so a failed send/preview leaves the menu usable.
         Dialog::Compose => selected_command_message(model, Dialog::Compose),
-        Dialog::CopyTo => Some(Message::CopySelectedToTarget),
-        Dialog::MoveTo => Some(Message::MoveSelectedToTarget),
-        Dialog::FlagAdd => Some(Message::FlagSelected { add: true }),
-        Dialog::FlagRemove => Some(Message::FlagSelected { add: false }),
+        Dialog::CopyTo => transfer_target(model).map(Message::CopySelectedTo),
+        Dialog::MoveTo => transfer_target(model).map(Message::MoveSelectedTo),
+        Dialog::FlagAdd => confirm_flag(model, true),
+        Dialog::FlagRemove => confirm_flag(model, false),
     }
+}
+
+// The picker dialogs close here, not in the transfer/flag handlers:
+// the dialog layer owns its lifecycle, and the handlers are also
+// reachable from the palette with no dialog open.
+fn transfer_target(model: &mut Model) -> Option<String> {
+    let target_id = model
+        .filtered_mailboxes()
+        .get(model.dialog_index)
+        .map(|m| m.id.clone());
+    close_dialog(model);
+    target_id
+}
+
+fn confirm_flag(model: &mut Model, add: bool) -> Option<Message> {
+    let action = model.selected_flag_action();
+    close_dialog(model);
+    Some(Message::FlagSelected { add, action })
 }
 
 fn selected_command_message(model: &Model, dialog: Dialog) -> Option<Message> {
@@ -708,61 +726,41 @@ fn fetch_for_forward(model: &mut Model) {
     }
 }
 
-fn do_copy(model: &mut Model) {
-    let target = model
-        .filtered_mailboxes()
-        .get(model.dialog_index)
-        .map(|m| (**m).clone());
-    close_dialog(model);
-    let Some(target) = target else { return };
+fn do_transfer(model: &mut Model, target_id: &str, is_move: bool) {
     let Some(envelope) = model.selected_envelope().cloned() else {
         return;
     };
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
+    let target_name = model
+        .mailbox_name(target_id)
+        .unwrap_or(target_id)
+        .to_string();
 
-    set_status(model, format!("Copying to {}…", target.name));
-    let result = model
-        .client
-        .copy_messages(&mailbox, &target.id, &[&envelope.id]);
+    let verb = if is_move { "Moving" } else { "Copying" };
+    set_status(model, format!("{verb} to {target_name}…"));
+
+    let result = if is_move {
+        model
+            .client
+            .move_messages(&mailbox, target_id, &[&envelope.id])
+    } else {
+        model
+            .client
+            .copy_messages(&mailbox, target_id, &[&envelope.id])
+    };
     match result {
+        Ok(()) if is_move => {
+            remove_selected_envelope(model);
+            set_status(model, "Moved");
+        }
         Ok(()) => set_status(model, "Copied"),
         Err(e) => set_status(model, format!("Error: {e}")),
     }
 }
 
-fn do_move(model: &mut Model) {
-    let target = model
-        .filtered_mailboxes()
-        .get(model.dialog_index)
-        .map(|m| (**m).clone());
-    close_dialog(model);
-    let Some(target) = target else { return };
-    let Some(envelope) = model.selected_envelope().cloned() else {
-        return;
-    };
-    let Some(mailbox) = model.selected_mailbox.clone() else {
-        return;
-    };
-
-    set_status(model, format!("Moving to {}…", target.name));
-    let result = model
-        .client
-        .move_messages(&mailbox, &target.id, &[&envelope.id]);
-    match result {
-        Ok(()) => {
-            remove_selected_envelope(model);
-            set_status(model, "Moved");
-        }
-        Err(e) => set_status(model, format!("Error: {e}")),
-    }
-}
-
-fn do_flag(model: &mut Model, add: bool) {
-    let action: FlagAction = model.selected_flag_action();
-    close_dialog(model);
-
+fn do_flag(model: &mut Model, add: bool, action: FlagAction) {
     let Some(envelope) = model.selected_envelope().cloned() else {
         return;
     };
@@ -928,6 +926,37 @@ mod tests {
             "expected a fetch error status, got {:?}",
             model.status_message
         );
+    }
+
+    #[test]
+    fn copy_message_dispatches_into_the_transfer_flow() {
+        let mut model = Model::default();
+        model.envelopes.push(Envelope::stub());
+        model.selected_mailbox = Some("INBOX".into());
+
+        apply_all(&mut model, Some(Message::CopySelectedTo("Archive".into())));
+
+        // The backend-less client cannot copy, so landing on the copy
+        // error proves the message dispatched into the transfer flow.
+        assert!(
+            model
+                .status_message
+                .as_deref()
+                .is_some_and(|s| s.starts_with("Error")),
+            "expected a transfer error status, got {:?}",
+            model.status_message
+        );
+    }
+
+    #[test]
+    fn confirming_an_empty_mailbox_dialog_closes_it() {
+        let mut model = Model::default();
+        apply_all(&mut model, Some(Message::OpenDialog(Dialog::CopyTo)));
+
+        apply_all(&mut model, Some(Message::DialogConfirm));
+
+        assert!(model.dialog.is_none());
+        assert!(model.status_message.is_none());
     }
 
     #[test]

@@ -83,12 +83,15 @@ impl Model {
         self.envelopes.get(self.envelope_index)
     }
 
-    pub fn selected_mailbox_name(&self) -> Option<&str> {
-        let id = self.selected_mailbox.as_deref()?;
+    pub fn mailbox_name(&self, id: &str) -> Option<&str> {
         self.mailboxes
             .iter()
             .find(|m| m.id == id)
             .map(|m| m.name.as_str())
+    }
+
+    pub fn selected_mailbox_name(&self) -> Option<&str> {
+        self.mailbox_name(self.selected_mailbox.as_deref()?)
     }
 
     /// Mailboxes visible after applying the filter input.
@@ -312,11 +315,18 @@ pub enum Message {
     LoadMailboxes,
     LoadEnvelopes,
     ReadSelected,
-    StartReplyToSelected { reply_all: bool },
+    StartReplyToSelected {
+        reply_all: bool,
+    },
     StartForwardSelected,
-    CopySelectedToTarget,
-    MoveSelectedToTarget,
-    FlagSelected { add: bool },
+    /// Transfer targets are mailbox ids, per [`Mailbox::id`]'s
+    /// contract; display names are looked up only for status text.
+    CopySelectedTo(String),
+    MoveSelectedTo(String),
+    FlagSelected {
+        add: bool,
+        action: FlagAction,
+    },
     SendCompose,
     PreviewCompose,
     SaveComposeToDrafts,

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::tui::{
     model::Model,
-    palette::{self, PALETTE_VISIBLE, PaletteEntry},
+    palette::{self, PALETTE_VISIBLE, PaletteRow},
     view::{aligned_row, render_filter_overlay},
 };
 
@@ -23,33 +23,25 @@ pub fn render(frame: &mut Frame, model: &Model) {
     // of the selection so no scroll state needs storing.
     let offset = state.selected.saturating_sub(PALETTE_VISIBLE - 1);
 
-    let items: Vec<ListItem> = palette::entries(model)
+    let items: Vec<ListItem> = palette::rows(model)
         .iter()
         .enumerate()
         .skip(offset)
         .take(PALETTE_VISIBLE)
-        .map(|(i, entry)| result_row(entry, model, i == state.selected, inner.width))
+        .map(|(i, row)| row_item(row, model, i == state.selected, inner.width))
         .collect();
-
     frame.render_widget(List::new(items), inner);
 }
 
-fn result_row(
-    entry: &PaletteEntry,
-    model: &Model,
-    is_selected: bool,
-    width: u16,
-) -> ListItem<'static> {
+fn row_item(row: &PaletteRow, model: &Model, is_selected: bool, width: u16) -> ListItem<'static> {
     let style = if is_selected {
         model.theme.cursor
-    } else if entry.is_available {
+    } else if row.is_available {
         model.theme.message_body
     } else {
         model.theme.border_inactive
     };
 
-    let hint = entry.command.hint(model.keybinds).unwrap_or_default();
-    let row = aligned_row(entry.command.name, &hint, is_selected, width);
-
-    ListItem::new(Line::from(Span::styled(row, style)))
+    let text = aligned_row(&row.label, &row.hint, is_selected, width);
+    ListItem::new(Line::from(Span::styled(text, style)))
 }
