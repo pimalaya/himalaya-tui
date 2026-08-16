@@ -9,7 +9,6 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 use io_jmap::client::JmapClientStd as Inner;
-use pimalaya_stream::tls::Tls;
 use url::Url;
 
 use crate::config::{JmapConfig, jmap_http_auth, parse_jmap_server};
@@ -23,6 +22,12 @@ pub struct JmapClient {
     /// Resolved JMAP session-endpoint URL, kept for [`JmapClient::ping`]
     /// and any later `session_get` refresh.
     url: Url,
+    /// Configured sending identity, overriding the one the send path
+    /// would otherwise resolve from the live session.
+    pub identity_id: Option<String>,
+    /// Configured drafts mailbox, overriding the one the send path
+    /// would otherwise resolve from the live session.
+    pub drafts_mailbox_id: Option<String>,
 }
 
 impl JmapClient {
@@ -30,19 +35,19 @@ impl JmapClient {
     /// server then fetch the session object (`/.well-known/jmap`
     /// discovery, primary accounts, upload/download URL templates).
     pub fn new(config: JmapConfig) -> Result<Self> {
-        // NOTE: himalaya-tui's `JmapConfig` never exposes `tls.rustls.alpn`
-        // directly, so the JMAP-level ALPN token is folded in here (the
-        // CLI does the same via `into_tls`).
-        let mut tls: Tls = config.tls.try_into()?;
-        tls.rustls.alpn = vec!["http/1.1".into()];
-
+        let tls = config.tls.into_tls(config.alpn);
         let http_auth = jmap_http_auth(config.auth)?;
         let url = parse_jmap_server(&config.server)?;
 
         let mut inner = Inner::connect(&url, &tls, http_auth)?;
         inner.session_get(&url)?;
 
-        Ok(Self { inner, url })
+        Ok(Self {
+            inner,
+            url,
+            identity_id: config.identity_id,
+            drafts_mailbox_id: config.drafts_mailbox_id,
+        })
     }
 
     /// Liveness check: re-fetches the JMAP session object against the

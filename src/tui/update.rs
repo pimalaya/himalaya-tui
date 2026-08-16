@@ -15,8 +15,8 @@ use mail_parser::MessageParser;
 use mml::{
     compiler::message::MmlCompileOptions,
     template::{
-        MmlTemplateCursor, compose::MmlTemplateComposeBuilder,
-        forward::MmlTemplateForwardBuilder, reply::MmlTemplateReplyBuilder,
+        MmlTemplateCursor, compose::MmlTemplateComposeBuilder, forward::MmlTemplateForwardBuilder,
+        reply::MmlTemplateReplyBuilder,
     },
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

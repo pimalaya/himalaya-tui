@@ -7,8 +7,11 @@
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
-use io_imap::client::ImapClientStd as Inner;
-use pimalaya_stream::{sasl::Sasl, tls::Tls};
+use io_imap::{
+    client::{ImapClient as _, ImapClientStd as Inner},
+    session::ImapSessionOpenOptions,
+};
+use io_sasl::mechanism::Sasl;
 
 use crate::config::{ImapConfig, parse_imap_server, resolve_auto_id_params};
 
@@ -26,9 +29,7 @@ impl ImapClient {
     /// pinning the `imap` ALPN identifier and honoring the account's
     /// auto-`ID` quirks.
     pub fn new(config: ImapConfig) -> Result<Self> {
-        let mut tls: Tls = config.tls.try_into()?;
-        tls.rustls.alpn = vec!["imap".into()];
-
+        let tls = config.tls.into_tls(config.alpn);
         let server = parse_imap_server(&config.server)?;
         let sasl: Option<Sasl> = config
             .sasl
@@ -44,9 +45,13 @@ impl ImapClient {
                 cfg.try_into_sasl(host, port)
             })
             .transpose()?;
-        let auto_id = resolve_auto_id_params(&config.id)?;
+        let opts = ImapSessionOpenOptions {
+            starttls: config.starttls,
+            auto_id: resolve_auto_id_params(&config.id)?,
+            sasl_ir: config.sasl_ir,
+        };
 
-        let (inner, _capabilities) = Inner::connect(&server, &tls, config.starttls, sasl, auto_id)?;
+        let (inner, _capabilities) = Inner::connect(&server, &tls, sasl, opts)?;
 
         Ok(Self { inner })
     }

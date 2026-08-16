@@ -188,6 +188,11 @@ imap.server = "example.com"
 # Enable STARTTLS (only valid when the server resolves to `imap://`).
 #imap.starttls = false
 
+# ALPN protocol identifiers offered during the TLS handshake (rustls only;
+# native-tls ignores it). Defaults to ["imap"]; set to [] to skip ALPN.
+#imap.alpn = ["imap"]
+#imap.alpn = []
+
 # Pick exactly one SASL mechanism among `anonymous`, `login`, `plain`,
 # `oauthbearer`, `xoauth2`, `scram-sha-256`. Omit the whole `imap.sasl` table
 # to skip authentication entirely (no `AUTHENTICATE` command sent).
@@ -224,6 +229,12 @@ imap.sasl.plain.password.raw = "***"
 #imap.sasl.scram-sha-256.username = "user@example.com"
 #imap.sasl.scram-sha-256.password.raw = "***"
 
+# RFC 4959 SASL-IR. Leave unset to follow the capability; set `false` to wait for
+# the server's continuation request instead of sending credentials inline (needed
+# by Coremail: 126.com, 163.com), or `true` to always send them inline.
+# https://www.rfc-editor.org/rfc/rfc4959.html
+#imap.sasl-ir = false
+
 # RFC 2971 ID extension. Some providers (mail.qq.com, fastmail) require an `ID`
 # exchange straight after authentication; set `auto = true` to opt in.
 # https://www.rfc-editor.org/rfc/rfc2971.html
@@ -234,6 +245,12 @@ imap.sasl.plain.password.raw = "***"
 # version, vendor, support-url); unknown keys with `true` fall back to NIL with
 # a warning. `false` always sends NIL. An empty map sends `ID NIL`.
 #imap.id.fields = { name = true, version = true, vendor = true, support-url = true }
+
+# RFC 5256 SORT fallback, read by the himalaya CLI only: the TUI paginates a
+# sequence-set window rather than issuing `SORT`, so it accepts the option to
+# keep a shared configuration file loading, and ignores it.
+# https://www.rfc-editor.org/rfc/rfc5256.html
+#imap.sort.fallback = false
 
 # --------------------------------------------------------------------------------
 # JMAP config
@@ -251,6 +268,11 @@ imap.sasl.plain.password.raw = "***"
 #jmap.tls.rustls.crypto = "ring"
 #jmap.tls.cert = "/path/to/custom/cert.pem"
 
+# ALPN protocol identifiers offered during the TLS handshake. Defaults to
+# ["http/1.1"] (JMAP rides on HTTP/1.1); set to [] to skip ALPN.
+#jmap.alpn = ["http/1.1"]
+#jmap.alpn = []
+
 # Pick exactly one of `header`, `bearer`, `basic`.
 
 # Raw `Authorization` header value, used verbatim.
@@ -265,6 +287,16 @@ imap.sasl.plain.password.raw = "***"
 #jmap.auth.basic.username = "user@example.com"
 #jmap.auth.basic.password.raw = "***"
 #jmap.auth.basic.password.command = "pass show fastmail"
+
+# Identity to send as. Optional: when omitted, the first identity `Identity/get`
+# reports on the live session is used. Set it to pin a specific one; list them
+# with `himalaya jmap identity get`.
+#jmap.identity-id = "I0123abc"
+
+# Drafts mailbox id used to stage outgoing messages before submission. Optional:
+# when omitted, the mailbox with the `drafts` role is resolved from the live
+# session. Find it with `himalaya jmap mailbox query --role drafts`.
+#jmap.drafts-mailbox-id = "M0123abc"
 
 # --------------------------------------------------------------------------------
 # Maildir config
@@ -301,6 +333,11 @@ smtp.server = "example.com"
 
 # Enable STARTTLS (only valid when the server resolves to `smtp://`).
 #smtp.starttls = false
+
+# ALPN protocol identifiers offered during the TLS handshake (rustls only;
+# native-tls ignores it). Defaults to ["smtp"]; set to [] to skip ALPN.
+#smtp.alpn = ["smtp"]
+#smtp.alpn = []
 
 # Pick exactly one SASL mechanism among `anonymous`, `login`, `plain`,
 # `oauthbearer`, `xoauth2`, `scram-sha-256`. Omit the whole `smtp.sasl` table

@@ -209,11 +209,8 @@ impl JmapClient {
     /// Queues `raw` for delivery: upload, import into drafts as
     /// `$draft`, then `EmailSubmission/set` under the sending identity.
     ///
-    /// NOTE: the himalaya CLI reads `identity_id` and
-    /// `drafts_mailbox_id` from its `[jmap]` config block. himalaya-tui's
-    /// `JmapConfig` carries neither field, so both are resolved from the
-    /// live JMAP session at send time: the first identity returned by
-    /// `Identity/get`, and the mailbox whose role is `drafts` (see
+    /// Both ids come from the `[jmap]` config block when set, and are
+    /// otherwise resolved from the live JMAP session at send time (see
     /// [`JmapClient::resolve_identity_id`] and
     /// [`JmapClient::resolve_drafts_mailbox_id`]).
     pub fn send_message(&mut self, raw: Vec<u8>) -> Result<()> {
@@ -279,12 +276,16 @@ impl JmapClient {
         Ok(self.blob_upload(&url, "message/rfc822", raw)?.blob_id)
     }
 
-    /// Resolves the sending identity from the live session.
+    /// Resolves the sending identity, preferring the configured
+    /// `identity_id`.
     ///
-    /// himalaya-tui has no configured `identity_id`, so the first
-    /// identity returned by `Identity/get` (all ids) is used. Bails when
-    /// the account exposes none.
+    /// Without one, the first identity returned by `Identity/get` (all
+    /// ids) is used. Bails when the account exposes none.
     fn resolve_identity_id(&mut self) -> Result<String> {
+        if let Some(id) = &self.identity_id {
+            return Ok(id.clone());
+        }
+
         let output = self.identity_get(JmapIdentityGetOptions { ids: None })?;
 
         output
@@ -295,12 +296,16 @@ impl JmapClient {
             .ok_or_else(|| anyhow!("JMAP account exposes no sending identity"))
     }
 
-    /// Resolves the drafts mailbox id from the live session.
+    /// Resolves the drafts mailbox id, preferring the configured
+    /// `drafts_mailbox_id`.
     ///
-    /// himalaya-tui has no configured `drafts_mailbox_id`, so the
-    /// mailbox whose role is `drafts` (RFC 8621 §2.1) is used. Bails
-    /// when the account exposes none.
+    /// Without one, the mailbox whose role is `drafts` (RFC 8621
+    /// section 2.1) is used. Bails when the account exposes none.
     fn resolve_drafts_mailbox_id(&mut self) -> Result<String> {
+        if let Some(id) = &self.drafts_mailbox_id {
+            return Ok(id.clone());
+        }
+
         let output = self.mailbox_get(JmapMailboxGetOptions {
             ids: None,
             properties: None,

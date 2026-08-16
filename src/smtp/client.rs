@@ -11,8 +11,10 @@ use std::{
 };
 
 use anyhow::Result;
-use io_smtp::{client::SmtpClientStd as Inner, rfc5321::SmtpEhloDomain};
-use pimalaya_stream::{sasl::Sasl, tls::Tls};
+use io_sasl::mechanism::Sasl;
+use io_smtp::{
+    client::SmtpClientStd as Inner, rfc5321::SmtpEhloDomain, session::SmtpSessionOpenOptions,
+};
 
 use crate::config::{SmtpConfig, parse_smtp_server};
 
@@ -25,8 +27,7 @@ impl SmtpClient {
     /// Opens the SMTP connection (TCP/TLS/STARTTLS, greeting, EHLO,
     /// SASL).
     pub fn new(config: SmtpConfig) -> Result<Self> {
-        let mut tls: Tls = config.tls.try_into()?;
-        tls.rustls.alpn = vec!["smtp".into()];
+        let tls = config.tls.into_tls(config.alpn);
         let domain: SmtpEhloDomain<'static> = Ipv4Addr::new(127, 0, 0, 1).into();
         let server = parse_smtp_server(&config.server)?;
         let sasl: Option<Sasl> = config
@@ -43,7 +44,10 @@ impl SmtpClient {
                 cfg.try_into_sasl(host, port)
             })
             .transpose()?;
-        let inner = Inner::connect(&server, &tls, config.starttls, domain, sasl)?;
+        let opts = SmtpSessionOpenOptions {
+            starttls: config.starttls,
+        };
+        let (inner, _capabilities) = Inner::connect(&server, &tls, domain, sasl, opts)?;
         Ok(Self { inner })
     }
 }

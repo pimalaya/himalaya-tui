@@ -49,7 +49,8 @@ use crate::{
     config::{
         AccountConfig, ImapConfig, JmapAuthConfig, JmapConfig, M2dirConfig, MaildirConfig,
         SaslAnonymousConfig, SaslConfig, SaslLoginConfig, SaslOauthbearerConfig, SaslPlainConfig,
-        SaslScramSha256Config, SaslXoauth2Config, SmtpConfig,
+        SaslScramSha256Config, SaslXoauth2Config, SmtpConfig, default_imap_alpn, default_jmap_alpn,
+        default_smtp_alpn,
     },
     wizard::{autoconfig, pacc, srv},
 };
@@ -196,7 +197,10 @@ fn build_url_account(url: Url, from: Option<&str>) -> Result<AccountConfig> {
             let jmap = JmapConfig {
                 server: url.to_string(),
                 tls: Default::default(),
+                alpn: default_jmap_alpn(),
                 auth,
+                identity_id: None,
+                drafts_mailbox_id: None,
             };
             Ok(account_jmap_only(jmap))
         }
@@ -245,7 +249,10 @@ fn build_discovery_account(
         let jmap = JmapConfig {
             server: jmap_endpoint.server,
             tls: Default::default(),
+            alpn: default_jmap_alpn(),
             auth,
+            identity_id: None,
+            drafts_mailbox_id: None,
         };
         return Ok(account_jmap_only(jmap));
     }
@@ -423,8 +430,11 @@ fn build_imap_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) ->
         server: format!("{scheme}://{host}:{port}"),
         tls: Default::default(),
         starttls,
+        alpn: default_imap_alpn(),
         sasl: Some(sasl),
+        sasl_ir: None,
         id: Default::default(),
+        sort: Default::default(),
     }
 }
 
@@ -434,6 +444,7 @@ fn build_smtp_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) ->
         server: format!("{scheme}://{host}:{port}"),
         tls: Default::default(),
         starttls,
+        alpn: default_smtp_alpn(),
         sasl: Some(sasl),
     }
 }

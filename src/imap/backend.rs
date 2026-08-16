@@ -12,6 +12,7 @@ use std::{collections::BTreeSet, num::NonZeroU32, str::from_utf8};
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, FixedOffset};
 use io_imap::{
+    client::ImapClient as _,
     rfc3501::{
         append::ImapMessageAppendOptions, copy::ImapMessageCopyOptions,
         fetch::ImapMessageFetchOptions, search::ImapMessageSearchOptions,
@@ -67,7 +68,7 @@ impl ImapClient {
                 let mbox = parse_mailbox(&mailbox.id)?;
                 let items = self.status(
                     mbox,
-                    vec![StatusDataItemName::Messages, StatusDataItemName::Unseen],
+                    vec![StatusDataItemName::Messages, StatusDataItemName::Unseen].into(),
                 )?;
                 apply_status(mailbox, items);
             }

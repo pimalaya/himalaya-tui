@@ -10,8 +10,11 @@
 use std::borrow::Cow;
 
 use anyhow::{Result, anyhow, bail};
-use io_smtp::rfc5321::{
-    SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
+use io_smtp::{
+    client::SmtpClient as _,
+    rfc5321::{
+        SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
+    },
 };
 use mail_parser::{Address as MailParserAddress, MessageParser};
 

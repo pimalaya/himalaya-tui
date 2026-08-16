@@ -11,6 +11,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
+#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
 use anyhow::Result;
 #[cfg(feature = "imap")]
 use anyhow::anyhow;
@@ -19,14 +20,17 @@ use io_imap::types::{
     IntoStatic,
     core::{IString, NString},
 };
+#[cfg(any(feature = "imap", feature = "smtp"))]
+use io_sasl::{
+    login::SaslLoginCreds, mechanism::Sasl, rfc4505::anonymous::SaslAnonymousCreds,
+    rfc4616::plain::SaslPlainCreds, rfc5801::SaslGs2ChannelBinding, rfc5802::SaslScramCreds,
+    rfc7628::oauthbearer::SaslOauthbearerCreds, xoauth2::SaslXoauth2Creds,
+};
 use pimalaya_config::{
-    secret::{Secret, SecretError},
+    secret::Secret,
     toml::{TomlConfig, shell_expanded_string},
 };
-#[cfg(any(feature = "imap", feature = "smtp"))]
-use pimalaya_stream::sasl::{
-    Sasl, SaslAnonymous, SaslLogin, SaslOauthbearer, SaslPlain, SaslScramSha256, SaslXoauth2,
-};
+#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
@@ -37,6 +41,25 @@ use crate::tui::{
     model::Keybinds,
     theme::{self, Theme},
 };
+
+// NOTE: these mirror the io-* crates' own defaults (IMAP `["imap"]`,
+// SMTP `["smtp"]`, JMAP `["http/1.1"]`), which the TUI folds into
+// `tls.rustls.alpn` rather than exposing that field to the TOML. They
+// stay ungated like the config structs they serve: every block
+// deserializes whatever backends this build enables, so that one
+// configuration file loads on every build.
+
+pub(crate) fn default_imap_alpn() -> Vec<String> {
+    vec!["imap".into()]
+}
+
+pub(crate) fn default_smtp_alpn() -> Vec<String> {
+    vec!["smtp".into()]
+}
+
+pub(crate) fn default_jmap_alpn() -> Vec<String> {
+    vec!["http/1.1".into()]
+}
 
 /// `deny_unknown_fields` is intentionally omitted so the same TOML
 /// file can be shared with the `himalaya` CLI: top-level CLI-only
@@ -241,12 +264,41 @@ pub struct ImapConfig {
     pub tls: TlsConfig,
     #[serde(default)]
     pub starttls: bool,
+    /// ALPN protocol identifiers offered during the TLS handshake.
+    /// Defaults to `["imap"]` (RFC 7595, IANA registry). Set to `[]`
+    /// to skip ALPN negotiation entirely. Only relevant for the rustls
+    /// provider; `native-tls` ignores ALPN.
+    #[serde(default = "default_imap_alpn")]
+    pub alpn: Vec<String>,
     pub sasl: Option<SaslConfig>,
+    /// RFC 4959 SASL-IR quirk. Left unset, follows the advertised
+    /// `SASL-IR` capability; `false` waits for the server's
+    /// continuation request rather than inlining credentials with
+    /// `AUTHENTICATE`. Coremail (126.com, 163.com) advertises it
+    /// falsely.
+    #[serde(default)]
+    pub sasl_ir: Option<bool>,
     /// RFC 2971 `ID` extension quirks. Some providers (notably
     /// mail.qq.com, fastmail) require an `ID` exchange straight after
     /// authentication; set `id.auto = true` to opt in.
     #[serde(default)]
     pub id: ImapIdConfig,
+    /// RFC 5256 `SORT` extension config.
+    #[serde(default)]
+    pub sort: ImapSortConfig,
+}
+
+/// Per-account `imap.sort.*` options.
+///
+/// Accepted so a configuration file shared with the himalaya CLI
+/// loads, but inert here: the TUI paginates a sequence-set window and
+/// reverses it rather than issuing `SORT`, so it has no fallback to
+/// choose between.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ImapSortConfig {
+    /// Forces the CLI's SORT fallback on or off. Read by the CLI only.
+    pub fallback: Option<bool>,
 }
 
 /// Per-account `imap.id.*` quirks.
@@ -345,6 +397,12 @@ pub struct SmtpConfig {
     pub tls: TlsConfig,
     #[serde(default)]
     pub starttls: bool,
+    /// ALPN protocol identifiers offered during the TLS handshake.
+    /// Defaults to `["smtp"]` (RFC 7595, IANA registry). Set to `[]`
+    /// to skip ALPN negotiation entirely. Only relevant for the rustls
+    /// provider; `native-tls` ignores ALPN.
+    #[serde(default = "default_smtp_alpn")]
+    pub alpn: Vec<String>,
     pub sasl: Option<SaslConfig>,
 }
 
@@ -359,18 +417,28 @@ pub fn parse_smtp_server(server: &str) -> Result<Url> {
     }
 }
 
-/// `deny_unknown_fields` is omitted so CLI-only JMAP fields
-/// (`identity-id`, `drafts-mailbox-id`) survive when the same block
-/// is reused by the CLI.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JmapConfig {
     /// JMAP server address. Either a bare authority for `/.well-known/jmap`
     /// discovery, or a full session-endpoint URL.
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
+    /// ALPN protocol identifiers offered during the TLS handshake.
+    /// Defaults to `["http/1.1"]` (JMAP rides on HTTP/1.1). Set to `[]`
+    /// to skip ALPN negotiation entirely. Only relevant for the rustls
+    /// provider; `native-tls` ignores ALPN.
+    #[serde(default = "default_jmap_alpn")]
+    pub alpn: Vec<String>,
     pub auth: JmapAuthConfig,
+    /// Identity id used when sending. Left unset, the first identity
+    /// reported by `Identity/get` on the live session is used.
+    pub identity_id: Option<String>,
+    /// Drafts mailbox id used to stage a message before submission.
+    /// Left unset, the mailbox whose role is `drafts` (RFC 8621
+    /// section 2.1) is resolved from the live session.
+    pub drafts_mailbox_id: Option<String>,
 }
 
 #[cfg(feature = "jmap")]
@@ -465,24 +533,28 @@ pub enum RustlsCryptoConfig {
     Ring,
 }
 
-impl TryFrom<TlsConfig> for Tls {
-    type Error = SecretError;
-
-    fn try_from(config: TlsConfig) -> Result<Self, Self::Error> {
-        Ok(Tls {
-            provider: config.provider.map(|p| match p {
+#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
+impl TlsConfig {
+    /// Builds the runtime [`Tls`] handle the connect helpers expect.
+    /// `alpn` is the protocol-level ALPN list (`["imap"]`, `["smtp"]`,
+    /// `["http/1.1"]`); pass an empty vec to skip ALPN. The TOML
+    /// schema never exposes `tls.rustls.alpn` directly: the
+    /// per-protocol `*.alpn` field is folded in here.
+    pub fn into_tls(self, alpn: Vec<String>) -> Tls {
+        Tls {
+            provider: self.provider.map(|p| match p {
                 TlsProviderConfig::Rustls => TlsProvider::Rustls,
                 TlsProviderConfig::NativeTls => TlsProvider::NativeTls,
             }),
             rustls: Rustls {
-                crypto: config.rustls.crypto.map(|c| match c {
+                crypto: self.rustls.crypto.map(|c| match c {
                     RustlsCryptoConfig::Aws => RustlsCrypto::Aws,
                     RustlsCryptoConfig::Ring => RustlsCrypto::Ring,
                 }),
-                alpn: Vec::new(),
+                alpn,
             },
-            cert: config.cert,
-        })
+            cert: self.cert,
+        }
     }
 }
 
@@ -555,30 +627,107 @@ impl SaslConfig {
     /// other mechanism.
     pub fn try_into_sasl(self, host: impl ToString, port: u16) -> Result<Sasl> {
         Ok(match self {
-            SaslConfig::Anonymous(c) => Sasl::Anonymous(SaslAnonymous { message: c.message }),
-            SaslConfig::Login(c) => Sasl::Login(SaslLogin {
+            SaslConfig::Anonymous(c) => Sasl::Anonymous(SaslAnonymousCreds { message: c.message }),
+            SaslConfig::Login(c) => Sasl::Login(SaslLoginCreds {
                 username: c.username,
                 password: c.password.get()?,
             }),
-            SaslConfig::Plain(c) => Sasl::Plain(SaslPlain {
+            SaslConfig::Plain(c) => Sasl::Plain(SaslPlainCreds {
                 authzid: c.authzid,
                 authcid: c.authcid,
                 passwd: c.passwd.get()?,
             }),
-            SaslConfig::Oauthbearer(c) => Sasl::Oauthbearer(SaslOauthbearer {
+            SaslConfig::Oauthbearer(c) => Sasl::Oauthbearer(SaslOauthbearerCreds {
                 username: c.username,
                 host: host.to_string(),
                 port,
                 token: c.token.get()?,
             }),
-            SaslConfig::Xoauth2(c) => Sasl::Xoauth2(SaslXoauth2 {
+            SaslConfig::Xoauth2(c) => Sasl::Xoauth2(SaslXoauth2Creds {
                 username: c.username,
                 token: c.token.get()?,
             }),
-            SaslConfig::ScramSha256(c) => Sasl::ScramSha256(SaslScramSha256 {
+            // NOTE: an empty nonce means "draw one for me": the client
+            // fills it before the exchange, an I/O-free coroutine having
+            // no way to generate randomness itself.
+            SaslConfig::ScramSha256(c) => Sasl::ScramSha256(SaslScramCreds {
                 username: c.username,
                 password: c.password.get()?,
+                nonce: Vec::new(),
+                channel_binding: SaslGs2ChannelBinding::Unsupported,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    /// Every option the himalaya CLI accepts in a block the TUI also
+    /// models must load here, whether the TUI acts on it or not: the
+    /// two binaries share one configuration file, and a
+    /// `deny_unknown_fields` block rejecting a CLI-only option would
+    /// leave that file usable by one binary only.
+    #[test]
+    fn cli_only_options_are_accepted() {
+        let toml = r#"
+            [accounts.example]
+            default = true
+            downloads-dir = "~/downloads"
+            table.preset = "││──╞═╪╡┆    ┬┴┌┐└┘"
+            envelope.list.datetime-fmt = "%F %R%:z"
+            mailbox.alias.inbox = "INBOX"
+
+            imap.server = "example.com"
+            imap.alpn = ["imap"]
+            imap.sasl-ir = false
+            imap.sort.fallback = true
+
+            smtp.server = "example.com"
+            smtp.alpn = ["smtp"]
+
+            jmap.server = "fastmail.com"
+            jmap.alpn = ["http/1.1"]
+            jmap.auth.bearer.token.raw = "***"
+            jmap.identity-id = "I0123abc"
+            jmap.drafts-mailbox-id = "M0123abc"
+        "#;
+
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let account = config.accounts.remove("example").unwrap();
+
+        let imap = account.imap.unwrap();
+        assert_eq!(imap.alpn, ["imap"]);
+        assert_eq!(imap.sasl_ir, Some(false));
+        assert_eq!(imap.sort.fallback, Some(true));
+
+        assert_eq!(account.smtp.unwrap().alpn, ["smtp"]);
+
+        let jmap = account.jmap.unwrap();
+        assert_eq!(jmap.alpn, ["http/1.1"]);
+        assert_eq!(jmap.identity_id.as_deref(), Some("I0123abc"));
+        assert_eq!(jmap.drafts_mailbox_id.as_deref(), Some("M0123abc"));
+    }
+
+    /// Omitting the ALPN lists must yield the per-protocol defaults
+    /// rather than an empty list, which would skip the handshake's ALPN
+    /// negotiation entirely and change how servers answer.
+    #[test]
+    fn omitted_alpn_falls_back_to_the_protocol_default() {
+        let toml = r#"
+            [accounts.example]
+            imap.server = "example.com"
+            smtp.server = "example.com"
+            jmap.server = "fastmail.com"
+            jmap.auth.bearer.token.raw = "***"
+        "#;
+
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let account = config.accounts.remove("example").unwrap();
+
+        assert_eq!(account.imap.unwrap().alpn, ["imap"]);
+        assert_eq!(account.smtp.unwrap().alpn, ["smtp"]);
+        assert_eq!(account.jmap.unwrap().alpn, ["http/1.1"]);
     }
 }

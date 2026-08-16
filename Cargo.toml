@@ -3,7 +3,7 @@ name = "himalaya-tui"
 description = "TUI to manage emails"
 version = "0.1.0"
 authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
-rust-version = "1.88"
+rust-version = "1.89"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["command-line-utilities", "email"]
@@ -30,7 +30,7 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.1", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.2", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
@@ -39,18 +39,19 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
-io-imap = { version = "0.3", default-features = false, optional = true }
-io-jmap = { version = "0.2", default-features = false, optional = true }
+io-imap = { version = "0.5", default-features = false, optional = true }
+io-jmap = { version = "0.3", default-features = false, optional = true }
 io-m2dir = { version = "0.2", default-features = false, optional = true }
 io-maildir = { version = "0.2", default-features = false, optional = true }
-io-smtp = { version = "0.2", default-features = false, optional = true }
+io-sasl = { version = "0.1", default-features = false, features = ["scram"] }
+io-smtp = { version = "0.3", default-features = false, optional = true }
 log = "0.4"
 mail-parser = "0.11"
 mime-meta-language = { version = "1.1", default-features = false, features = ["compiler", "interpreter"] }
-pimalaya-cli = { version = "0.1", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
+pimalaya-cli = { version = "0.2", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
 pimalaya-config = { version = "0.1", default-features = false, features = ["toml", "secret"] }
-pimalaya-stream = { version = "0.1", default-features = false, features = ["std"] }
-io-pim-discovery = { version = "0.3", default-features = false, features = ["pacc", "autoconfig", "rfc6186"] }
+pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }
+io-pim-discovery = { version = "0.7", default-features = false, features = ["pacc", "autoconfig", "rfc6186"] }
 ratatui = { version = "0.30", features = ["serde"] }
 rfc2047-decoder = "1"
 secrecy = "0.10"
@@ -65,3 +66,9 @@ uuid = { version = "1.19", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 uds_windows = "1"
+
+[patch.crates-io]
+# NOTE: the composer targets the post-1.1.1 mml API (MmlCompileOptions,
+# the template builders taking a rendered quote); drop this once mml
+# ships a release carrying it.
+mime-meta-language.git = "https://github.com/pimalaya/mml"
