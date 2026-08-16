@@ -23,10 +23,13 @@
   - [Nix](#nix)
   - [Sources](#sources)
 - [Configuration](#configuration)
+  - [Starting without a configuration](#starting-without-a-configuration)
+  - [Provider recipes](#provider-recipes)
   - [Theming](#theming)
 - [Usage](#usage)
   - [Keybindings](#keybindings)
   - [Composing messages](#composing-messages)
+  - [Re-using sessions](#re-using-sessions)
 - [Interfaces](#interfaces)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
@@ -41,13 +44,14 @@
 - **Simple auth** support for IMAP/SMTP: anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256
 - **HTTP auth** support for JMAP: basic, bearer
 - **TLS** support:
-  - [Rustls](https://crates.io/crates/rustls) with ring crypto
+  - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
 - **Discovery** support:
-  - Autoconfiguration (Thunderbird) <sup>[specs](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)</sup>
   - PACC <sup>[specs](https://datatracker.ietf.org/doc/html/draft-ietf-mailmaint-pacc)</sup>
+  - Autoconfiguration (Thunderbird) <sup>[specs](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)</sup>
   - SRV DNS lookups <sup>[rfc6186](https://datatracker.ietf.org/doc/html/rfc6186)</sup>
+- **SOCKS5**, **HTTP** proxy support via `all_proxy`, `https_proxy` and `no_proxy`
 - **Three-pane layout** built on [ratatui](https://ratatui.rs): mailboxes, envelopes, message body or composer
 - **In-app composer** powered by [edtui](https://crates.io/crates/edtui) with system-editor handoff (`Alt-e`)
 - **Color themes**: built-in presets plus per-field overrides in the config (see [Theming](#theming))
@@ -67,13 +71,13 @@ Himalaya TUI is not yet released, therefore the only way to get a pre-built bina
 
 ### Cargo
 
-```
+```sh
 cargo install --locked --git https://github.com/pimalaya/himalaya-tui.git
 ```
 
 With only IMAP+SMTP support:
 
-```
+```sh
 cargo install --locked --git https://github.com/pimalaya/himalaya-tui.git \
   --no-default-features \
   --features imap,smtp,rustls-ring
@@ -83,19 +87,19 @@ cargo install --locked --git https://github.com/pimalaya/himalaya-tui.git \
 
 If you have the [Flakes](https://nixos.wiki/wiki/Flakes) feature enabled:
 
-```
+```sh
 nix profile install github:pimalaya/himalaya-tui
 ```
 
 Or run without installing:
 
-```
+```sh
 nix run github:pimalaya/himalaya-tui
 ```
 
 ### Sources
 
-```
+```sh
 git clone https://github.com/pimalaya/himalaya-tui
 cd himalaya-tui
 nix run
@@ -103,13 +107,13 @@ nix run
 
 ## Configuration
 
-Run `himalaya-tui`. With no configuration file on disk the wizard prompts for an email address, a server URL or a bare domain, runs provider discovery, asks for SASL or HTTP credentials, then keeps the resulting account in memory for that session only (the TUI does not write to disk).
+Himalaya TUI reads a configuration, it never writes one. Accounts are authored by the [himalaya](https://github.com/pimalaya/himalaya) CLI, whose wizard proposes an `[accounts.<name>]` table for your file, or by hand against [config.sample.toml](./config.sample.toml). There is no `configure` command here.
 
-A persistent configuration is loaded from the first valid path among:
+A configuration is loaded from the first valid path among:
 
-- `$XDG_CONFIG_HOME/himalaya/config.toml`
-- `$HOME/.config/himalaya/config.toml`
-- `$HOME/.himalayarc`
+- $XDG_CONFIG_HOME/himalaya/config.toml
+- $HOME/.config/himalaya/config.toml
+- $HOME/.himalayarc
 
 These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CLI looks at: one TOML file backs both binaries, **starting from himalaya CLI v2**. TUI-only fields and CLI-only sections coexist without errors. See [config.sample.toml](./config.sample.toml) for a documented template.
 
@@ -118,7 +122,26 @@ These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CL
 
 Override the path with `-c <PATH>` or `HIMALAYA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first one is the base and the rest are deep-merged on top.
 
-Pass `--no-config` to ignore both, even when a file is present: useful for testing another account in memory without exposing stored credentials.
+Pick the account to open with `-a <NAME>`, or let the one flagged `default = true` be used. An unknown name is an error listing the accounts your file does hold.
+
+### Starting without a configuration
+
+A run that resolves no account still has to open something, so it falls back to a wizard that builds one **in memory, for that session only**. Nothing reaches your file, and nothing is proposed for it: to keep an account, author it with the CLI or by hand.
+
+You can ask for that fallback outright, in two ways. The positional argument seeds it, so `himalaya-tui you@fastmail.com` skips the account lookup and opens a throwaway account discovered from that address, keeping the rest of your file (theme, signature, keybindings). `--no-config` drops the file whole, theme included, and prompts for the address instead. Both are silent, having been asked for, and neither can be combined with `-a`.
+
+The fallback also happens by accident, and there it warns on stderr naming what was missing, since it usually means a mistyped path or a forgotten `default = true`:
+
+```
+✗ No configuration file at /home/you/.config/himalaya/config.toml, falling back to an in-memory account
+✗ Configuration file carries no default account, falling back to an in-memory account
+```
+
+Either way the wizard asks for an email address unless the positional argument already supplied one, probes the discovery mechanisms in series until one answers, then asks for the SASL or HTTP credentials that mechanism needs. A server URL (`imaps://mail.example.com`) and a local folder path (`file:///home/you/Mail`) are accepted wherever the address is, they are just not what the prompt asks for. DNS goes through the host's own resolver, falling back to Cloudflare's `1.1.1.1` over TCP when it finds none; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
+
+### Provider recipes
+
+The account blocks are the ones the CLI documents, so the ready-made configurations for Proton Mail, Fastmail, Gmail, Outlook, Posteo and iCloud Mail live once, in the [himalaya Configuration section](https://github.com/pimalaya/himalaya#configuration), and apply verbatim here. Only the CLI-only keys around them are ignored by the TUI.
 
 ### Theming
 
@@ -138,7 +161,7 @@ Color values accept named ANSI (`"blue"`, `"dark-gray"`, …), hex (`"#ff8800"`)
 
 Overrides are merged on top of the preset: any field you leave out keeps the preset value, so you can change just one attribute (e.g. only the cursor `fg`) and inherit the rest. Themable elements: `header`, `status-bar`, `border-active`, `border-inactive`, `dialog-border`, `cursor`, `mailbox-current`, `envelope-header`, `envelope-seen`, `envelope-unread`, `message-body`, `compose-text`, `compose-cursor`, `compose-selection`.
 
-Presets live as plain Rust files under [src/tui/theme](./src/tui/theme/) and are shipped with the binary; pull requests adding new presets are welcome (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
+The presets shipped with the binary are `default` (named ANSI, the built-in), `dracula-dark`, `one-light` and `tokyo-night`. They live as plain Rust files under [src/tui/theme](./src/tui/theme/); pull requests adding new presets are welcome (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
 ## Usage
 
@@ -172,7 +195,11 @@ Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, 
 
 Drafts are written in [MML](https://github.com/pimalaya/mml) and compiled to MIME on send. Headers (`From`, `To`, `Subject`…) live at the top of the buffer; the body and any MML directives (attachments, signing, encryption) follow.
 
-Sending routes through SMTP when an `[accounts.<name>.smtp]` block is configured, otherwise through JMAP. Drafts can be saved to the `Drafts` mailbox at any time.
+Sending routes through the storage backend when it can send on its own (JMAP), otherwise through the `[accounts.<name>.smtp]` transport, which connects on the first send rather than at startup. Drafts can be saved to the `Drafts` mailbox at any time.
+
+### Re-using sessions
+
+An `imap.server` or `smtp.server` given as `unix:///path/to/socket` reaches a local socket proxy such as [sirup](https://github.com/pimalaya/sirup), whose greeting is already authenticated: no credentials are configured on this side and none are negotiated over the socket.
 
 ## Interfaces
 

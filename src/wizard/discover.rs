@@ -1,16 +1,30 @@
-//! Interactive configuration wizard.
+//! Interactive wizard building an in-memory account to run on.
 //!
-//! Flow:
+//! This is not the himalaya CLI's wizard and does not do its job. The
+//! CLI's wizard authors a configuration: it proposes an
+//! `[accounts.<name>]` table for the user's file, and the account
+//! outlives the run. The TUI writes no configuration of its own and
+//! authors no account, since it reads the file the CLI already wrote.
+//! What this wizard produces is a throwaway [`AccountConfig`] that
+//! exists for the current session only, so a run with nothing to open
+//! still has something to open.
 //!
-//! Unlike the himalaya CLI wizard, which runs every discovery method in
-//! parallel and prints a config the user copies into their config file,
-//! the TUI probes methods in series (first hit wins, below) and returns
-//! a ready-to-use in-memory [`AccountConfig`] for the running session.
-//! The prompts are deliberately kept identical to the CLI: same
-//! email/server/folder entry, same SASL and HTTP authentication
-//! selection.
+//! It therefore runs only when the session has no account to start on,
+//! which happens four ways (see [`crate::cli`]). Two ask for it: the
+//! positional argument seeds it, skipping the account lookup outright,
+//! and `--no-config` drops the file whole and prompts instead. Two are
+//! accidents and warn first: no configuration file was found at the
+//! default paths or at the one `-c` named, or the file that was found
+//! carries no default account. Picking a stored account is `-a`'s job,
+//! and an unknown name there is an error rather than a way in here.
 //!
-//! 1. Ask once for an email address, a server URL or a local folder path.
+//! Being a fallback rather than an authoring tool is what shapes the
+//! flow: it asks the fewest questions that yield a usable session, so
+//! the probes run in series and the first hit wins, with no picker to
+//! arbitrate between reachable services.
+//!
+//! 1. Ask once for an email address (a server URL or a local folder
+//!    path are accepted too).
 //! 2. If the input is a `file://` URL: validate the Maildir root, ask
 //!    for the `From:` address, done.
 //! 3. If the input is another URL: scheme picks the protocol; host,
@@ -23,15 +37,16 @@
 //!    IMAP+SMTP pair.
 //! 5. Ask straight for the SASL (IMAP/SMTP) or HTTP (JMAP)
 //!    authentication mechanism and only the parameters that mechanism
-//!    needs, mirroring the CLI wizard's selection.
+//!    needs.
 //! 6. Return the assembled [`AccountConfig`]. Nothing is written to
 //!    disk; the secret is kept in a `secrecy` wrapper ([`Secret::Raw`]),
 //!    typed via a single masked prompt with no confirmation. The live
 //!    connection is opened later by the caller from this config.
 
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
+use io_pim_discovery::shared::dns::system_resolver;
 use pimalaya_cli::{
     prompt,
     wizard::{
@@ -41,7 +56,7 @@ use pimalaya_cli::{
     },
 };
 use pimalaya_config::secret::Secret;
-use pimalaya_stream::tls::Tls;
+use pimalaya_stream::tls::{Rustls, Tls};
 use secrecy::SecretString;
 use url::Url;
 
@@ -49,24 +64,45 @@ use crate::{
     config::{
         AccountConfig, ImapConfig, JmapAuthConfig, JmapConfig, M2dirConfig, MaildirConfig,
         SaslAnonymousConfig, SaslConfig, SaslLoginConfig, SaslOauthbearerConfig, SaslPlainConfig,
-        SaslScramSha256Config, SaslXoauth2Config, SmtpConfig, default_imap_alpn, default_jmap_alpn,
-        default_smtp_alpn,
+        SaslScramSha256Config, SaslXoauth2Config, SmtpConfig,
     },
     wizard::{autoconfig, pacc, srv},
 };
 
+/// DNS-over-TCP resolver backing discovery when `HIMALAYA_DNS_RESOLVER`
+/// is unset and no system resolver is found: Cloudflare's `1.1.1.1`.
 const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
+/// The resolver every probe queries: the one `HIMALAYA_DNS_RESOLVER`
+/// names, else the host's own, else [`DEFAULT_RESOLVER`]. Preferring
+/// the system resolver keeps a split-horizon or corporate network
+/// resolving the way every other program on that host does.
 pub fn discovery_resolver() -> Url {
+    if let Ok(resolver) = env::var("HIMALAYA_DNS_RESOLVER")
+        && let Ok(url) = resolver.parse()
+    {
+        return url;
+    }
+
+    if let Some(url) = system_resolver() {
+        return url;
+    }
+
     DEFAULT_RESOLVER
         .parse()
         .expect("DEFAULT_RESOLVER must be a valid URL")
 }
 
+/// TLS profile for the HTTPS-bound discovery mechanisms; they only
+/// speak HTTP/1.1 to `_well-known` endpoints.
 pub fn discovery_tls() -> Tls {
-    let mut tls = Tls::default();
-    tls.rustls.alpn = vec!["http/1.1".into()];
-    tls
+    Tls {
+        rustls: Rustls {
+            alpn: vec!["http/1.1".into()],
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// Per-source discovery payload. Each successful probe carries
@@ -84,8 +120,15 @@ impl DiscoveryResult {
     }
 }
 
+/// Prompts for the value to discover from, then runs the flow on it.
+///
+/// The prompt asks for an email alone, matching the himalaya CLI's:
+/// naming every accepted shape up front read as a question about which
+/// one to pick rather than an invitation to type the obvious answer. A
+/// server URL and a folder path still work, and the empty-input error
+/// is where that is spelled out.
 pub fn run(from: Option<&str>) -> Result<AccountConfig> {
-    let input = prompt::text::<&str>("Email, server or folder path:", None)?;
+    let input = prompt::text::<&str>("Email:", None)?;
     run_with_input(input.trim(), from)
 }
 
@@ -113,7 +156,7 @@ enum Input {
 
 fn classify(input: &str) -> Result<Input> {
     if input.is_empty() {
-        bail!("Empty input");
+        bail!("Empty input: enter an email address, a server URL, or a folder path");
     }
 
     if input.contains('@') && !input.contains("://") {
@@ -138,8 +181,6 @@ fn classify(input: &str) -> Result<Input> {
         Err(err) => Err(err.into()),
     }
 }
-
-// ── Maildir / m2dir ─────────────────────────────────────────────────────────
 
 fn build_fs_account(root: PathBuf) -> Result<AccountConfig> {
     if !root.is_dir() {
@@ -176,8 +217,6 @@ fn empty_account() -> AccountConfig {
     }
 }
 
-// ── URL input ───────────────────────────────────────────────────────────────
-
 fn build_url_account(url: Url, from: Option<&str>) -> Result<AccountConfig> {
     let scheme = url.scheme().to_ascii_lowercase();
     let Some(host) = url.host_str().map(str::to_owned) else {
@@ -197,7 +236,7 @@ fn build_url_account(url: Url, from: Option<&str>) -> Result<AccountConfig> {
             let jmap = JmapConfig {
                 server: url.to_string(),
                 tls: Default::default(),
-                alpn: default_jmap_alpn(),
+                alpn: None,
                 auth,
                 identity_id: None,
                 drafts_mailbox_id: None,
@@ -219,8 +258,6 @@ fn extract_discovery_domain(host: &str) -> &str {
         host
     }
 }
-
-// ── Domain / email input (first-hit-wins discovery, no picker) ──────────────
 
 fn build_discovery_account(
     local_part: Option<&str>,
@@ -249,7 +286,7 @@ fn build_discovery_account(
         let jmap = JmapConfig {
             server: jmap_endpoint.server,
             tls: Default::default(),
-            alpn: default_jmap_alpn(),
+            alpn: None,
             auth,
             identity_id: None,
             drafts_mailbox_id: None,
@@ -336,8 +373,6 @@ fn discover(local_part: Option<&str>, domain: &str) -> DiscoveryResult {
     DiscoveryResult::default()
 }
 
-// ── SASL (IMAP/SMTP) ────────────────────────────────────────────────────────
-
 // The SASL mechanisms split by credential kind: a password family
 // (login + password), a token family (login + API token) and ANONYMOUS
 // (no credentials). Labels, order and prompts are kept identical to the
@@ -391,8 +426,6 @@ fn prompt_sasl(email: Option<&str>) -> Result<SaslConfig> {
     })
 }
 
-// ── JMAP HTTP auth ──────────────────────────────────────────────────────────
-
 // The JMAP HTTP authentication schemes, kept identical to the himalaya
 // CLI wizard (`wizard::jmap::prompt_auth`); both schemes are always
 // offered since the TUI discovery advertises no capabilities.
@@ -415,14 +448,10 @@ fn prompt_jmap_auth(email: Option<&str>) -> Result<JmapAuthConfig> {
     })
 }
 
-// ── Secret entry: single masked prompt, no confirmation ─────────────────────
-
 fn prompt_raw_secret(label: &str) -> Result<Secret> {
     let raw = prompt::secret(format!("{label}:"))?;
     Ok(Secret::Raw(SecretString::from(raw)))
 }
-
-// ── Config assembly ─────────────────────────────────────────────────────────
 
 fn build_imap_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) -> ImapConfig {
     let scheme = if starttls { "imap" } else { "imaps" };
@@ -430,7 +459,7 @@ fn build_imap_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) ->
         server: format!("{scheme}://{host}:{port}"),
         tls: Default::default(),
         starttls,
-        alpn: default_imap_alpn(),
+        alpn: None,
         sasl: Some(sasl),
         sasl_ir: None,
         id: Default::default(),
@@ -444,7 +473,7 @@ fn build_smtp_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) ->
         server: format!("{scheme}://{host}:{port}"),
         tls: Default::default(),
         starttls,
-        alpn: default_smtp_alpn(),
+        alpn: None,
         sasl: Some(sasl),
     }
 }

@@ -7,20 +7,19 @@
 //! so the default XDG path resolves to `himalaya/config.toml`, allowing
 //! the same file to back both binaries.
 //!
+//! Every block is modelled unconditionally, so one configuration file
+//! loads whatever backends a build enables. The converters turning a
+//! block into a runtime handle are therefore modelled unconditionally
+//! too, and each carries an `allow(dead_code)` for the builds whose
+//! feature set leaves it without a caller. They gate on no cargo
+//! feature of their own, since the crates they need (io-sasl,
+//! pimalaya-stream, url) are unconditional dependencies.
+//!
 //! [`himalaya`]: https://github.com/pimalaya/himalaya
 
 use std::{collections::HashMap, path::PathBuf};
 
-#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
-use anyhow::Result;
-#[cfg(feature = "imap")]
-use anyhow::anyhow;
-#[cfg(feature = "imap")]
-use io_imap::types::{
-    IntoStatic,
-    core::{IString, NString},
-};
-#[cfg(any(feature = "imap", feature = "smtp"))]
+use anyhow::{Result, bail};
 use io_sasl::{
     login::SaslLoginCreds, mechanism::Sasl, rfc4505::anonymous::SaslAnonymousCreds,
     rfc4616::plain::SaslPlainCreds, rfc5801::SaslGs2ChannelBinding, rfc5802::SaslScramCreds,
@@ -30,36 +29,15 @@ use pimalaya_config::{
     secret::Secret,
     toml::{TomlConfig, shell_expanded_string},
 };
-#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
-#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
 use url::Url;
 
 use crate::tui::{
     model::Keybinds,
     theme::{self, Theme},
 };
-
-// NOTE: these mirror the io-* crates' own defaults (IMAP `["imap"]`,
-// SMTP `["smtp"]`, JMAP `["http/1.1"]`), which the TUI folds into
-// `tls.rustls.alpn` rather than exposing that field to the TOML. They
-// stay ungated like the config structs they serve: every block
-// deserializes whatever backends this build enables, so that one
-// configuration file loads on every build.
-
-pub(crate) fn default_imap_alpn() -> Vec<String> {
-    vec!["imap".into()]
-}
-
-pub(crate) fn default_smtp_alpn() -> Vec<String> {
-    vec!["smtp".into()]
-}
-
-pub(crate) fn default_jmap_alpn() -> Vec<String> {
-    vec!["http/1.1".into()]
-}
 
 /// `deny_unknown_fields` is intentionally omitted so the same TOML
 /// file can be shared with the `himalaya` CLI: top-level CLI-only
@@ -76,9 +54,9 @@ pub struct Config {
     /// Composer keybinding flavor (Vim or Emacs). The CLI `--keybinds`
     /// flag overrides this; both default to Vim when omitted.
     pub keybinds: Option<Keybinds>,
-    /// Color theme: pick a preset (`dracula`, `one-dark`, …) and/or
-    /// override individual fields. Resolved into a [`Theme`] at
-    /// startup.
+    /// Color theme: pick a preset (`dracula-dark`, `one-light`,
+    /// `tokyo-night`) and/or override individual fields. Resolved into
+    /// a [`Theme`] at startup.
     #[serde(default)]
     pub theme: ThemeConfig,
     pub accounts: HashMap<String, AccountConfig>,
@@ -92,6 +70,30 @@ impl TomlConfig for Config {
     /// the CLI uses, allowing one shared configuration file.
     fn project_name() -> &'static str {
         "himalaya"
+    }
+
+    /// Overrides the default implementation, whose bare "Get account
+    /// error" leaves the user guessing: a name that does not exist is
+    /// usually a typo, so the error lists the ones the file does hold.
+    /// The default-account arm is unchanged, [`crate::cli`] turning its
+    /// [`None`] into the in-memory fallback.
+    fn take_account(&mut self, name: Option<&str>) -> Result<Option<(String, Self::Account)>> {
+        let Some(name) = name.filter(|name| !name.is_empty() && *name != "default") else {
+            return Ok(self.take_default_account());
+        };
+
+        if let Some(account) = self.take_named_account(name) {
+            return Ok(Some(account));
+        }
+
+        let mut known: Vec<&str> = self.accounts.keys().map(String::as_str).collect();
+        known.sort_unstable();
+
+        if known.is_empty() {
+            bail!("No account `{name}`: the configuration file declares none at all");
+        }
+
+        bail!("No account `{name}` in the configuration file, which declares {known:?}")
     }
 
     fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
@@ -116,7 +118,7 @@ impl TomlConfig for Config {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThemeConfig {
     /// Preset theme name. Each variant maps to one file under
-    /// `src/tui/theme/`.
+    /// src/tui/theme/.
     pub preset: Option<PresetConfig>,
     pub header: Option<StyleConfig>,
     pub status_bar: Option<StyleConfig>,
@@ -134,9 +136,9 @@ pub struct ThemeConfig {
     pub compose_selection: Option<StyleConfig>,
 }
 
-/// Names of presets shipped with the binary. Contributors add a
-/// preset by dropping a new file under `src/tui/theme/`, registering
-/// it in `src/tui/theme/mod.rs`, and adding a variant + match arm here.
+/// Names of presets shipped with the binary. Contributors add a preset
+/// by dropping a new file under src/tui/theme/, declaring it in
+/// src/tui/theme.rs, and adding a variant and a match arm here.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PresetConfig {
@@ -252,24 +254,50 @@ pub struct AccountConfig {
     pub downloads_dir: Option<PathBuf>,
 }
 
+/// Parses a `server` field into a [`Url`].
+///
+/// A bare `host:port` must be detected by the absence of `://`: the
+/// URL parser would otherwise read it as `scheme:path` (for instance
+/// `mail.example.com:993` parses as the scheme `mail.example.com`), so
+/// any string without an explicit `://` is treated as an authority
+/// under `default_scheme`. The resulting scheme is validated against
+/// `allowed`.
+#[allow(dead_code)]
+pub fn parse_server(server: &str, default_scheme: &str, allowed: &[&str]) -> Result<Url> {
+    let url = if server.contains("://") {
+        Url::parse(server)?
+    } else {
+        Url::parse(&format!("{default_scheme}://{server}"))?
+    };
+
+    let scheme = url.scheme();
+
+    if !allowed.contains(&scheme) {
+        bail!("Invalid server scheme `{scheme}`: expected one of {allowed:?}");
+    }
+
+    Ok(url)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ImapConfig {
     /// IMAP server address. Either a bare authority
     /// (`imap.example.com[:port]`, treated as `imaps://<authority>`),
-    /// or a full URL with `imap://` (cleartext, optional STARTTLS) or
-    /// `imaps://` (implicit TLS).
+    /// or a full URL with `imap://` (cleartext, optional STARTTLS),
+    /// `imaps://` (implicit TLS) or `unix://` (a local pre-authenticated
+    /// socket proxy such as sirup).
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default)]
     pub starttls: bool,
-    /// ALPN protocol identifiers offered during the TLS handshake.
-    /// Defaults to `["imap"]` (RFC 7595, IANA registry). Set to `[]`
-    /// to skip ALPN negotiation entirely. Only relevant for the rustls
-    /// provider; `native-tls` ignores ALPN.
-    #[serde(default = "default_imap_alpn")]
-    pub alpn: Vec<String>,
+    /// ALPN protocol identifiers offered during the TLS handshake. Set
+    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
+    /// default io-imap itself defines applies (`["imap"]`, RFC 7595).
+    /// Only relevant for the rustls provider; `native-tls` ignores ALPN.
+    #[serde(default)]
+    pub alpn: Option<Vec<String>>,
     pub sasl: Option<SaslConfig>,
     /// RFC 4959 SASL-IR quirk. Left unset, follows the advertised
     /// `SASL-IR` capability; `false` waits for the server's
@@ -321,100 +349,26 @@ pub struct ImapIdConfig {
     pub fields: HashMap<String, bool>,
 }
 
-#[cfg(feature = "imap")]
-pub fn parse_imap_server(server: &str) -> Result<Url> {
-    match Url::parse(server) {
-        Ok(url) => Ok(url),
-        Err(url::ParseError::RelativeUrlWithoutBase) => {
-            Ok(Url::parse(&format!("imaps://{server}"))?)
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
-/// Resolves an [`ImapIdConfig`] into the wire-level parameter list
-/// passed to the io-imap auth coroutines.
-///
-/// [`None`] when `auto = false`; otherwise a vec where each entry
-/// maps the user-supplied key to either himalaya-tui's canned value
-/// (when the user set `true` and the key is well-known) or `NIL`.
-/// Unknown keys with `true` log a warning and fall back to `NIL`.
-#[cfg(feature = "imap")]
-pub fn resolve_auto_id_params(
-    config: &ImapIdConfig,
-) -> Result<Option<Vec<(IString<'static>, NString<'static>)>>> {
-    if !config.auto {
-        return Ok(None);
-    }
-
-    let mut params = Vec::with_capacity(config.fields.len());
-    for (key, &use_canned) in &config.fields {
-        let ikey = IString::try_from(key.clone())
-            .map_err(|err| anyhow!("Invalid IMAP ID parameter key `{key}`: {err}"))?
-            .into_static();
-
-        let nval = if use_canned {
-            match canned_imap_id_value(key) {
-                Some(value) => NString::try_from(value)
-                    .map_err(|err| {
-                        anyhow!("Invalid canned IMAP ID value `{value}` for `{key}`: {err}")
-                    })?
-                    .into_static(),
-                None => {
-                    log::warn!("imap.id.fields.{key} = true: no canned value defined, sending NIL");
-                    NString::NIL
-                }
-            }
-        } else {
-            NString::NIL
-        };
-
-        params.push((ikey, nval));
-    }
-    Ok(Some(params))
-}
-
-#[cfg(feature = "imap")]
-fn canned_imap_id_value(key: &str) -> Option<&'static str> {
-    match key {
-        "name" => Some(env!("CARGO_PKG_NAME")),
-        "version" => Some(env!("CARGO_PKG_VERSION")),
-        "vendor" => Some("Pimalaya"),
-        "support-url" => Some("https://github.com/pimalaya/himalaya-tui"),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SmtpConfig {
     /// SMTP server address. Either a bare authority
     /// (`smtp.example.com[:port]`, treated as `smtps://<authority>`),
-    /// or a full URL with `smtp://` (cleartext, optional STARTTLS) or
-    /// `smtps://` (implicit TLS).
+    /// or a full URL with `smtp://` (cleartext, optional STARTTLS),
+    /// `smtps://` (implicit TLS) or `unix://` (a local pre-authenticated
+    /// socket proxy such as sirup).
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default)]
     pub starttls: bool,
-    /// ALPN protocol identifiers offered during the TLS handshake.
-    /// Defaults to `["smtp"]` (RFC 7595, IANA registry). Set to `[]`
-    /// to skip ALPN negotiation entirely. Only relevant for the rustls
-    /// provider; `native-tls` ignores ALPN.
-    #[serde(default = "default_smtp_alpn")]
-    pub alpn: Vec<String>,
+    /// ALPN protocol identifiers offered during the TLS handshake. Set
+    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
+    /// default io-smtp itself defines applies (`["smtp"]`, RFC 7595).
+    /// Only relevant for the rustls provider; `native-tls` ignores ALPN.
+    #[serde(default)]
+    pub alpn: Option<Vec<String>>,
     pub sasl: Option<SaslConfig>,
-}
-
-#[cfg(feature = "smtp")]
-pub fn parse_smtp_server(server: &str) -> Result<Url> {
-    match Url::parse(server) {
-        Ok(url) => Ok(url),
-        Err(url::ParseError::RelativeUrlWithoutBase) => {
-            Ok(Url::parse(&format!("smtps://{server}"))?)
-        }
-        Err(err) => Err(err.into()),
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -425,12 +379,13 @@ pub struct JmapConfig {
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
-    /// ALPN protocol identifiers offered during the TLS handshake.
-    /// Defaults to `["http/1.1"]` (JMAP rides on HTTP/1.1). Set to `[]`
-    /// to skip ALPN negotiation entirely. Only relevant for the rustls
-    /// provider; `native-tls` ignores ALPN.
-    #[serde(default = "default_jmap_alpn")]
-    pub alpn: Vec<String>,
+    /// ALPN protocol identifiers offered during the TLS handshake. Set
+    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
+    /// default io-jmap itself defines applies (`["http/1.1"]`, JMAP
+    /// riding on HTTP/1.1). Only relevant for the rustls provider;
+    /// `native-tls` ignores ALPN.
+    #[serde(default)]
+    pub alpn: Option<Vec<String>>,
     pub auth: JmapAuthConfig,
     /// Identity id used when sending. Left unset, the first identity
     /// reported by `Identity/get` on the live session is used.
@@ -439,36 +394,6 @@ pub struct JmapConfig {
     /// Left unset, the mailbox whose role is `drafts` (RFC 8621
     /// section 2.1) is resolved from the live session.
     pub drafts_mailbox_id: Option<String>,
-}
-
-#[cfg(feature = "jmap")]
-pub fn parse_jmap_server(server: &str) -> Result<Url> {
-    match Url::parse(server) {
-        Ok(url) => Ok(url),
-        Err(url::ParseError::RelativeUrlWithoutBase) => {
-            Ok(Url::parse(&format!("https://{server}"))?)
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
-#[cfg(feature = "jmap")]
-pub fn jmap_http_auth(config: JmapAuthConfig) -> Result<secrecy::SecretString> {
-    use base64::{Engine, prelude::BASE64_STANDARD};
-    use secrecy::ExposeSecret;
-
-    match config {
-        JmapAuthConfig::Header(token) => Ok(token.get()?),
-        JmapAuthConfig::Bearer { token } => {
-            let token = token.get()?;
-            Ok(format!("Bearer {}", token.expose_secret()).into())
-        }
-        JmapAuthConfig::Basic { username, password } => {
-            let creds = format!("{}:{}", username, password.get()?.expose_secret());
-            let encoded = BASE64_STANDARD.encode(creds.into_bytes());
-            Ok(format!("Basic {encoded}").into())
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -533,7 +458,7 @@ pub enum RustlsCryptoConfig {
     Ring,
 }
 
-#[cfg(any(feature = "imap", feature = "smtp", feature = "jmap"))]
+#[allow(dead_code)]
 impl TlsConfig {
     /// Builds the runtime [`Tls`] handle the connect helpers expect.
     /// `alpn` is the protocol-level ALPN list (`["imap"]`, `["smtp"]`,
@@ -619,7 +544,7 @@ pub struct SaslScramSha256Config {
     pub password: Secret,
 }
 
-#[cfg(any(feature = "imap", feature = "smtp"))]
+#[allow(dead_code)]
 impl SaslConfig {
     /// Resolves the SASL config into a runtime [`Sasl`]. `host` and
     /// `port` come from the live server URL; they are only used by
@@ -662,7 +587,7 @@ impl SaslConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, parse_server};
 
     /// Every option the himalaya CLI accepts in a block the TUI also
     /// models must load here, whether the TUI acts on it or not: the
@@ -698,36 +623,82 @@ mod tests {
         let account = config.accounts.remove("example").unwrap();
 
         let imap = account.imap.unwrap();
-        assert_eq!(imap.alpn, ["imap"]);
+        assert_eq!(imap.alpn.as_deref(), Some(["imap".to_string()].as_slice()));
         assert_eq!(imap.sasl_ir, Some(false));
         assert_eq!(imap.sort.fallback, Some(true));
 
-        assert_eq!(account.smtp.unwrap().alpn, ["smtp"]);
+        let smtp = account.smtp.unwrap();
+        assert_eq!(smtp.alpn.as_deref(), Some(["smtp".to_string()].as_slice()));
 
         let jmap = account.jmap.unwrap();
-        assert_eq!(jmap.alpn, ["http/1.1"]);
+        assert_eq!(
+            jmap.alpn.as_deref(),
+            Some(["http/1.1".to_string()].as_slice())
+        );
         assert_eq!(jmap.identity_id.as_deref(), Some("I0123abc"));
         assert_eq!(jmap.drafts_mailbox_id.as_deref(), Some("M0123abc"));
     }
 
-    /// Omitting the ALPN lists must yield the per-protocol defaults
-    /// rather than an empty list, which would skip the handshake's ALPN
-    /// negotiation entirely and change how servers answer.
+    /// An omitted ALPN list must stay distinguishable from an explicit
+    /// empty one: the first resolves to the protocol default at connect
+    /// time, the second deliberately skips ALPN negotiation, and
+    /// collapsing them changes how servers answer the handshake.
     #[test]
-    fn omitted_alpn_falls_back_to_the_protocol_default() {
+    fn omitted_alpn_differs_from_an_empty_one() {
         let toml = r#"
             [accounts.example]
             imap.server = "example.com"
             smtp.server = "example.com"
-            jmap.server = "fastmail.com"
-            jmap.auth.bearer.token.raw = "***"
+            smtp.alpn = []
         "#;
 
         let mut config: Config = toml::from_str(toml).unwrap();
         let account = config.accounts.remove("example").unwrap();
 
-        assert_eq!(account.imap.unwrap().alpn, ["imap"]);
-        assert_eq!(account.smtp.unwrap().alpn, ["smtp"]);
-        assert_eq!(account.jmap.unwrap().alpn, ["http/1.1"]);
+        assert_eq!(account.imap.unwrap().alpn, None);
+        assert_eq!(account.smtp.unwrap().alpn, Some(Vec::new()));
+    }
+
+    /// A bare authority carrying a port must not be read as a URL: the
+    /// scheme grammar accepts dots, so `mail.example.com:993` parses as
+    /// the scheme `mail.example.com` with the path `993`, silently
+    /// connecting nowhere.
+    #[test]
+    fn bare_authority_keeps_its_host_and_port() {
+        let url = parse_server("mail.example.com:993", "imaps", &["imap", "imaps"]).unwrap();
+        assert_eq!(url.scheme(), "imaps");
+        assert_eq!(url.host_str(), Some("mail.example.com"));
+        assert_eq!(url.port(), Some(993));
+    }
+
+    #[test]
+    fn explicit_url_keeps_its_scheme() {
+        let url = parse_server("imap://mail.example.com", "imaps", &["imap", "imaps"]).unwrap();
+        assert_eq!(url.scheme(), "imap");
+    }
+
+    #[test]
+    fn unlisted_scheme_is_rejected() {
+        assert!(parse_server("ftp://mail.example.com", "imaps", &["imap", "imaps"]).is_err());
+    }
+
+    /// The shipped sample is the field reference the README points at,
+    /// so an option renamed here without being renamed there ships a
+    /// template that does not load. Uncommenting every line is not the
+    /// point (many are deliberately exclusive alternatives): the point
+    /// is that what the file does declare still matches the model.
+    #[test]
+    fn shipped_sample_config_loads() {
+        let sample = include_str!("../config.sample.toml");
+        let config: Config = toml::from_str(sample).expect("config.sample.toml must deserialize");
+
+        let account = config
+            .accounts
+            .get("example")
+            .expect("config.sample.toml must declare the example account");
+
+        assert!(account.default);
+        assert!(account.imap.is_some());
+        assert!(account.smtp.is_some());
     }
 }

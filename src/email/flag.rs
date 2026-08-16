@@ -55,12 +55,11 @@ pub enum IanaFlag {
     MdnSent,
 }
 
+#[allow(dead_code)]
 impl Flag {
     /// Builds a [`Flag`] from a wire spelling. The raw string is kept
     /// verbatim; the IANA classification is derived by
-    /// [`classify_iana`]. Only the backends that report flags as wire
-    /// strings (IMAP, JMAP, m2dir) parse them this way.
-    #[cfg(any(feature = "imap", feature = "jmap", feature = "m2dir"))]
+    /// [`classify_iana`].
     pub fn from_raw(raw: impl Into<String>) -> Self {
         let raw = raw.into();
         let iana = classify_iana(&raw);
@@ -85,10 +84,7 @@ impl Flag {
     }
 
     /// IANA classification when the raw spelling matched a registered
-    /// keyword; `None` for user-defined custom keywords. Read by the
-    /// backends that map flags back to a wire format (IMAP, JMAP,
-    /// Maildir).
-    #[cfg(any(feature = "imap", feature = "jmap", feature = "maildir"))]
+    /// keyword; `None` for user-defined custom keywords.
     pub fn iana(&self) -> Option<IanaFlag> {
         self.iana
     }
@@ -155,7 +151,6 @@ impl Hash for Flag {
 /// Strips a single leading `\` or `$` prefix, lowercases the rest, and
 /// matches against the canonical name list. Returns `None` for custom
 /// user-defined keywords.
-#[cfg(any(feature = "imap", feature = "jmap", feature = "m2dir"))]
 pub fn classify_iana(raw: &str) -> Option<IanaFlag> {
     let stripped = raw
         .strip_prefix('\\')
@@ -205,7 +200,7 @@ pub enum FlagOp {
     Remove,
 }
 
-#[cfg(all(test, any(feature = "imap", feature = "jmap", feature = "m2dir")))]
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 

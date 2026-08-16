@@ -1307,14 +1307,11 @@ dependencies = [
  "rfc2047-decoder",
  "secrecy",
  "serde",
- "serde_json",
- "shellexpand",
  "simplelog",
  "toml",
  "tui-input",
  "uds_windows",
  "url",
- "uuid",
 ]
 
 [[package]]

@@ -8,6 +8,9 @@
 //! `<proto>/backend.rs`), which takes and returns the shared
 //! [`crate::email`] types.
 
+#[cfg(feature = "smtp")]
+use std::mem;
+
 use anyhow::{Result, anyhow, bail};
 
 #[cfg(feature = "imap")]
@@ -18,8 +21,6 @@ use crate::jmap::client::JmapClient;
 use crate::m2dir::client::M2dirClient;
 #[cfg(feature = "maildir")]
 use crate::maildir::client::MaildirClient;
-#[cfg(feature = "smtp")]
-use crate::smtp::client::SmtpClient;
 use crate::{
     config::AccountConfig,
     email::{
@@ -28,12 +29,26 @@ use crate::{
         mailbox::Mailbox,
     },
 };
+#[cfg(feature = "smtp")]
+use crate::{config::SmtpConfig, smtp::client::SmtpClient};
 
 /// Cross-protocol email client backing the interface.
 pub struct EmailClient {
     storage: Option<BackendClient>,
     #[cfg(feature = "smtp")]
-    smtp: Option<SmtpClient>,
+    smtp: SmtpTransport,
+}
+
+/// The SMTP transport slot, connected lazily on the first send so that
+/// a reading session never opens an SMTP connection.
+#[cfg(feature = "smtp")]
+enum SmtpTransport {
+    /// No SMTP configured for this account.
+    Absent,
+    /// Configured but not yet connected.
+    Pending(Box<SmtpConfig>),
+    /// Connected.
+    Ready(SmtpClient),
 }
 
 /// The active storage backend: exactly one of the compiled-in
@@ -52,22 +67,18 @@ enum BackendClient {
 impl EmailClient {
     /// Opens the connections for the account: the first configured
     /// storage backend (local before network), plus an SMTP transport
-    /// when one is configured. A failing SMTP connection is downgraded
-    /// to a warning (sending stays unavailable) rather than aborting
-    /// the whole session. Bails when no storage backend is usable.
+    /// when one is configured. Bails when no storage backend is usable.
     pub fn new(#[allow(unused_mut)] mut account_config: AccountConfig) -> Result<Self> {
         let storage = select_storage(&mut account_config)?;
 
+        // NOTE: kept unconnected here, so a session that only reads
+        // opens no SMTP connection (it also lets a single-session proxy
+        // such as sirup serve the storage backend without a second
+        // client).
         #[cfg(feature = "smtp")]
         let smtp = match account_config.smtp.take() {
-            Some(config) => match SmtpClient::new(config) {
-                Ok(smtp) => Some(smtp),
-                Err(err) => {
-                    log::warn!("SMTP backend disabled: {err}. Sending will be unavailable.");
-                    None
-                }
-            },
-            None => None,
+            Some(config) => SmtpTransport::Pending(Box::new(config)),
+            None => SmtpTransport::Absent,
         };
 
         if storage.is_none() {
@@ -117,6 +128,9 @@ impl EmailClient {
         page_size: Option<u32>,
         with_attachment: bool,
     ) -> Result<Vec<Envelope>> {
+        let mailbox = self.resolve_mailbox_id(mailbox)?;
+        let mailbox = mailbox.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => {
@@ -139,6 +153,9 @@ impl EmailClient {
 
     /// Fetches one message's raw RFC 5322 bytes.
     pub fn get_message(&mut self, mailbox: &str, id: &str) -> Result<Vec<u8>> {
+        let mailbox = self.resolve_mailbox_id(mailbox)?;
+        let mailbox = mailbox.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => client.get_message(mailbox, id),
@@ -159,6 +176,9 @@ impl EmailClient {
         flags: &[Flag],
         op: FlagOp,
     ) -> Result<()> {
+        let mailbox = self.resolve_mailbox_id(mailbox)?;
+        let mailbox = mailbox.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => client.store_flags(mailbox, ids, flags, op),
@@ -173,6 +193,9 @@ impl EmailClient {
 
     /// Adds `raw` to `mailbox` with `flags`. Returns the created id.
     pub fn add_message(&mut self, mailbox: &str, flags: &[Flag], raw: Vec<u8>) -> Result<String> {
+        let mailbox = self.resolve_mailbox_id(mailbox)?;
+        let mailbox = mailbox.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => client.add_message(mailbox, flags, raw),
@@ -187,6 +210,11 @@ impl EmailClient {
 
     /// Copies a message id set from `from` to `to`.
     pub fn copy_messages(&mut self, from: &str, to: &str, ids: &[&str]) -> Result<()> {
+        let from = self.resolve_mailbox_id(from)?;
+        let from = from.as_str();
+        let to = self.resolve_mailbox_id(to)?;
+        let to = to.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => client.copy_messages(from, to, ids),
@@ -201,6 +229,11 @@ impl EmailClient {
 
     /// Moves a message id set from `from` to `to`.
     pub fn move_messages(&mut self, from: &str, to: &str, ids: &[&str]) -> Result<()> {
+        let from = self.resolve_mailbox_id(from)?;
+        let from = from.as_str();
+        let to = self.resolve_mailbox_id(to)?;
+        let to = to.as_str();
+
         match self.storage_mut()? {
             #[cfg(feature = "imap")]
             BackendClient::Imap(client) => client.move_messages(from, to, ids),
@@ -214,7 +247,8 @@ impl EmailClient {
     }
 
     /// Sends `raw`: through the storage backend when it can send itself
-    /// (JMAP), otherwise through the SMTP transport.
+    /// (JMAP), otherwise through the SMTP transport, connecting it on
+    /// this first use.
     #[cfg_attr(not(any(feature = "jmap", feature = "smtp")), allow(unused_variables))]
     pub fn send_message(&mut self, raw: Vec<u8>) -> Result<()> {
         match &mut self.storage {
@@ -224,11 +258,46 @@ impl EmailClient {
         }
 
         #[cfg(feature = "smtp")]
-        if let Some(smtp) = &mut self.smtp {
+        if let Some(smtp) = self.smtp_mut()? {
             return smtp.send_message(raw);
         }
 
         bail!("No send-capable backend (JMAP) or SMTP is configured for this account")
+    }
+
+    /// Maps the interface's human mailbox name onto the backend-native
+    /// id the operation methods expect. Identity for every backend whose
+    /// name already is its id (IMAP, Maildir, m2dir); JMAP resolves the
+    /// opaque mailbox id via a cached `Mailbox/get`. Applied by the
+    /// mailbox-addressing methods above before they dispatch, so each
+    /// per-protocol adapter only ever receives ids. Idempotent: an
+    /// already-resolved id passes through unchanged.
+    pub fn resolve_mailbox_id(&mut self, mailbox: &str) -> Result<String> {
+        match self.storage_mut()? {
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.resolve_mailbox_id(mailbox),
+            #[allow(unreachable_patterns)]
+            _ => Ok(mailbox.to_string()),
+        }
+    }
+
+    /// The SMTP transport, connected on this first use. [`None`] when
+    /// the account configures no `[smtp]` block.
+    #[cfg(feature = "smtp")]
+    fn smtp_mut(&mut self) -> Result<Option<&mut SmtpClient>> {
+        if let SmtpTransport::Pending(_) = &self.smtp {
+            let SmtpTransport::Pending(config) =
+                mem::replace(&mut self.smtp, SmtpTransport::Absent)
+            else {
+                unreachable!()
+            };
+            self.smtp = SmtpTransport::Ready(SmtpClient::new(*config)?);
+        }
+
+        Ok(match &mut self.smtp {
+            SmtpTransport::Ready(client) => Some(client),
+            _ => None,
+        })
     }
 
     fn storage_mut(&mut self) -> Result<&mut BackendClient> {

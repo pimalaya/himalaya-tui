@@ -1,9 +1,16 @@
-//! Resolved [`Theme`] used by every render function. Each themable
-//! element is a ratatui [`Style`], so background, foreground and
-//! modifiers (bold/italic/…) are tuned in one place. Presets are
-//! plain `const` values in sibling files; [`Theme::resolve`] layers
-//! per-field overrides from [`crate::config::ThemeConfig`] on top via
-//! [`Style::patch`].
+//! Color themes for the TUI.
+//!
+//! [`Theme`] is what every render function reads. Each themable element
+//! is a ratatui [`Style`], so background, foreground and modifiers
+//! (bold, italic, …) are tuned in one place. The built-in presets are
+//! plain `const` values, one per submodule; [`Theme::resolve`] layers
+//! the per-field overrides from [`crate::config::ThemeConfig`] on top
+//! via [`Style::patch`].
+
+pub mod default;
+pub mod dracula_dark;
+pub mod one_light;
+pub mod tokyo_night;
 
 use ratatui::style::Style;
 

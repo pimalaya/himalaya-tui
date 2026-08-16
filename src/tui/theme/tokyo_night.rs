@@ -1,4 +1,4 @@
-//! Tokyo Night (Night) — 24-bit RGB palette.
+//! Tokyo Night (Night), a 24-bit RGB palette.
 //! bg=#1a1b26, line-bg=#292e42, fg=#c0caf5, comment=#565f89,
 //! cyan=#7dcfff, blue=#7aa2f7, purple=#bb9af7, green=#9ece6a,
 //! red=#f7768e, orange=#e0af68

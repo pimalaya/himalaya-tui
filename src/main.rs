@@ -23,10 +23,11 @@
 //! one `BackendClient` enum variant per compiled-in backend: the first
 //! configured storage backend (local before network), plus an optional
 //! SMTP transport for storage backends that cannot send (IMAP, Maildir,
-//! m2dir). Each operation matches the active backend and calls its
-//! per-protocol `backend.rs` adapter, which converts io-* results into
-//! the TUI's own [`email`] shared types (Envelope, Mailbox, Flag,
-//! Address).
+//! m2dir), connected lazily on the first send. Each operation resolves
+//! its mailbox argument to the backend-native id, then matches the
+//! active backend and calls its per-protocol `backend.rs` adapter,
+//! which converts io-* results into the TUI's own [`email`] shared
+//! types (Envelope, Mailbox, Flag, Address).
 //!
 //! ## Terminal interface
 //!
@@ -42,8 +43,13 @@
 //!
 //! [`main`] parses the CLI flags, runs any auxiliary subcommand
 //! (completions, manuals), otherwise builds the [`tui::model::Model`]
-//! from the config file or the setup wizard and hands it to
-//! [`tui::app::run`].
+//! and hands it to [`tui::app::run`].
+//!
+//! The account it runs on comes from the configuration file, which the
+//! himalaya CLI authors and the TUI only reads: there is no `configure`
+//! command here and nothing is ever written to disk. When that file
+//! resolves no account, [`wizard`] fills the gap with a throwaway
+//! account that lives for the session alone.
 
 mod cli;
 mod config;

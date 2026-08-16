@@ -25,10 +25,10 @@ use crate::{
 /// (selection clamping) depend on this constant.
 pub const MAILBOX_DIALOG_VISIBLE: usize = 10;
 
-/// Minimum idle period after which the app issues a NOOP to every
-/// registered network backend. Tuned below the tightest common SMTP
-/// submission timeout (~120 s behind corporate NAT / cloud firewalls)
-/// so connections stay warm during long reading sessions.
+/// Minimum idle period after which the app pings the active storage
+/// backend. Tuned below the tightest common submission timeout (around
+/// 120 s behind corporate NAT and cloud firewalls) so the connection
+/// stays warm during long reading sessions.
 pub const PING_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Model {

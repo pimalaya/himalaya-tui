@@ -502,7 +502,25 @@ fn parse_rfc2822_date(raw: &str) -> Option<DateTime<FixedOffset>> {
     if trimmed.is_empty() {
         return None;
     }
-    DateTime::parse_from_rfc2822(trimmed).ok()
+
+    // NOTE: chrono validates the optional leading day-of-week against
+    // the date and rejects the whole timestamp when they disagree (a
+    // surprising number of senders get the weekday wrong). The weekday
+    // is redundant, so on failure retry without it.
+    DateTime::parse_from_rfc2822(trimmed)
+        .or_else(|_| DateTime::parse_from_rfc2822(strip_weekday(trimmed)))
+        .ok()
+}
+
+/// Drops a leading `Dow, ` day-of-week token (for instance `Thu, `)
+/// from an RFC 2822 date, leaving the unambiguous `DD Mon YYYY …`
+/// remainder that chrono parses without a weekday check. Returns the
+/// input untouched when it has no such prefix.
+fn strip_weekday(date: &str) -> &str {
+    match date.split_once(", ") {
+        Some((dow, rest)) if dow.len() == 3 && dow.bytes().all(|b| b.is_ascii_alphabetic()) => rest,
+        _ => date,
+    }
 }
 
 fn bytes_to_string(bytes: &[u8]) -> String {

@@ -4,9 +4,7 @@
 
 use std::{env::temp_dir, fs::File, path::PathBuf, time::Instant};
 
-use anyhow::Result;
-#[cfg(not(all(feature = "imap", feature = "smtp", feature = "jmap")))]
-use anyhow::bail;
+use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use edtui::{EditorState, Lines};
 use pimalaya_cli::{
@@ -44,10 +42,27 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Account name, or anything that can be used by the wizard to discover
-    /// your account (URL, domain, email etc).
-    #[arg(name = "account_name", value_name = "ACCOUNT-OR-SERVER")]
-    pub account_or_server: Option<String>,
+    /// Email address to discover a throwaway account from.
+    ///
+    /// Passing one skips the account lookup entirely and opens the
+    /// account discovered from this value, so it is the quickest way to
+    /// try a server without touching your configuration. A server URL
+    /// and a local folder path work here too, the address being what
+    /// this is reached for. The rest of the file (theme, signature,
+    /// keybindings) still applies; `--no-config` drops that too.
+    /// Omitting it and `--account` alike opens the default account.
+    #[arg(value_name = "EMAIL", conflicts_with = "account")]
+    pub seed: Option<String>,
+
+    /// Account to open, as named in the configuration file.
+    ///
+    /// Defaults to the account flagged `default = true`. A name the
+    /// file cannot answer, because it holds no such account or because
+    /// there is no file at all, is an error rather than a fallback to
+    /// the wizard: use the positional argument for that.
+    #[arg(long, short, value_name = "NAME")]
+    #[arg(conflicts_with_all = ["seed", "no_config"])]
+    pub account: Option<String>,
 
     /// Override the From address used when sending or saving drafts.
     #[arg(long, value_name = "EMAIL")]
@@ -67,7 +82,8 @@ pub struct Cli {
     ///
     /// The given paths are shell-expanded then canonicalized (if
     /// applicable). If the first path does not point to a valid file,
-    /// the wizard is run to build a config in memory. Other paths are
+    /// the run warns and falls back to the wizard, which builds an
+    /// account in memory for this session only. Other paths are
     /// merged with the first one, which allows you to separate your
     /// public config from your private(s) one(s). Multiple paths can
     /// also be provided by delimiting them with `:` (like `$PATH` in
@@ -75,14 +91,15 @@ pub struct Cli {
     #[arg(long = "config", short, global = true, env = "HIMALAYA_CONFIG")]
     #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
     pub config_paths: Vec<PathBuf>,
-    /// Skip configuration file lookup and run the wizard.
+    /// Skip the configuration file entirely and run the wizard.
     ///
     /// Useful when a config already exists on disk but you want a
-    /// throwaway, in-memory account for this run (e.g. to try another
-    /// server, or hand off the TUI to someone else without exposing
-    /// your stored credentials). The wizard never writes to disk;
+    /// throwaway, in-memory account for this run (e.g. to hand the TUI
+    /// off to someone else without exposing your stored credentials).
+    /// Unlike the positional argument, this drops the whole file, theme
+    /// and signature included. The wizard never writes to disk;
     /// `--config` and `HIMALAYA_CONFIG` are ignored when this flag is
-    /// set.
+    /// set, and no warning is raised since the wizard was asked for.
     #[arg(long = "no-config")]
     pub no_config: bool,
     #[command(flatten)]
@@ -104,13 +121,48 @@ impl Cli {
             })?,
         )?;
 
+        // NOTE: a seed and `--no-config` ask for the wizard outright, so
+        // the account lookup is skipped and nothing is warned about. The
+        // wizard also runs when that lookup finds nothing, but there it
+        // is a mistake the user can fix, and `wizard_reason` names which.
+        let asked_for_wizard = self.no_config || self.seed.is_some();
+        let mut wizard_reason = None;
+
+        // NOTE: a seed keeps the file for its globals (theme, signature,
+        // keybindings) and only swaps the account out; `--no-config`
+        // drops the file whole.
         let loaded = if self.no_config {
             None
         } else {
-            Config::from_paths_or_default(&self.config_paths)?
+            let loaded = Config::from_paths_or_default(&self.config_paths)?;
+
+            if loaded.is_none() && !asked_for_wizard {
+                let path = Config::target_path(&self.config_paths)?;
+
+                // NOTE: `-a` addresses the file and nothing else, so a
+                // file that is not there cannot answer it. Falling back
+                // would silently open something other than what was
+                // asked for.
+                if let Some(name) = &self.account {
+                    bail!(
+                        "No account `{name}`: there is no configuration file at {}",
+                        path.display()
+                    );
+                }
+
+                wizard_reason = Some(format!(
+                    "No configuration file at {}, falling back to an in-memory account",
+                    path.display()
+                ));
+            }
+
+            loaded
         };
 
-        let mut account_name = String::from("unspecified");
+        let mut account_name = self
+            .seed
+            .clone()
+            .unwrap_or_else(|| String::from("unspecified"));
         let mut display_name = None;
         let mut signature = String::new();
         let mut keybinds_config = None;
@@ -122,21 +174,34 @@ impl Cli {
             signature = config.signature.take().unwrap_or_default();
             keybinds_config = config.keybinds.take();
             theme = Theme::resolve(&config.theme);
-            if let Some((name, cfg)) = config.take_account(self.account_or_server.as_deref())? {
-                account_name = name;
-                account = Some(cfg);
+
+            if !asked_for_wizard {
+                match config.take_account(self.account.as_deref())? {
+                    Some((name, cfg)) => {
+                        account_name = name;
+                        account = Some(cfg);
+                    }
+                    None => {
+                        wizard_reason = Some(String::from(
+                            "Configuration file carries no default account, falling back to an in-memory account",
+                        ));
+                    }
+                }
             }
         }
 
         let mut account_config = match account {
             Some(account) => account,
-            // No matching account (no config, or the config carries no
-            // such account and no default): fall back to the wizard,
-            // seeding it with the positional argument (an email, server
-            // or URI) when one was given, otherwise prompting for one.
+            // No stored account to run on, so the wizard builds one in
+            // memory for this session. It is not the CLI's wizard: it
+            // writes nothing and proposes no config entry. The seed
+            // feeds it when one was given, otherwise it prompts.
             None => {
-                spinner.clear();
-                let account = run_wizard(self.account_or_server.as_deref(), self.from.as_deref())?;
+                match wizard_reason {
+                    Some(reason) => spinner.failure(reason),
+                    None => spinner.clear(),
+                }
+                let account = run_wizard(self.seed.as_deref(), self.from.as_deref())?;
                 spinner = Spinner::start("Loading…");
                 account
             }

@@ -10,10 +10,18 @@
 # paths can be passed at once, separated by `:`; the first one is the base and
 # the rest are deep-merged on top of it. `--no-config` skips on-disk config.
 #
-# Run `himalaya-tui` once with no config file to launch the wizard, which
-# discovers IMAP/SMTP/JMAP defaults via PACC, Thunderbird Autoconfiguration and
-# RFC 6186 SRV, then keeps the resulting account in memory for that session
-# only (the TUI does not write to disk).
+# himalaya-tui reads this file, it never writes it. Author an account with the
+# `himalaya` CLI wizard, which proposes an `[accounts.<name>]` table to paste
+# here, or by hand from this template.
+#
+# A run that resolves no account falls back to a wizard that discovers
+# IMAP/SMTP/JMAP settings via PACC, Thunderbird Autoconfiguration and RFC 6186
+# SRV, and keeps the result in memory for that session alone. It proposes
+# nothing for this file. Ask for it with `himalaya-tui <EMAIL>` (this file still
+# supplies the theme and signature) or with `--no-config` (it does not); it also
+# happens, with a warning, when no file is found or none of the accounts is
+# flagged `default = true`. Its probes resolve DNS through the host's own
+# resolver; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
 #
 # The path is shared with the `himalaya` CLI: one TOML file backs both
 # binaries. TUI-only fields (`display-name`, `signature`, `signature-delim`,
@@ -65,8 +73,9 @@
 
 #[theme]
 
-# Preset theme: `default` (named ANSI), `dracula-dark`, `one-light`. Omit to
-# start from the built-in default; overrides below are layered on top.
+# Preset theme: `default` (named ANSI), `dracula-dark`, `one-light` or
+# `tokyo-night`. Omit to start from the built-in default; overrides below are
+# layered on top.
 #preset = "dracula-dark"
 
 # Each `[theme.*]` table overrides one UI element. Any field left out keeps
@@ -142,14 +151,16 @@
 # Account config
 # --------------------------------------------------------------------------------
 
-# Declare one section per account. Pick one with `[ACCOUNT]` (positional CLI
-# argument) or let himalaya-tui use the entry flagged `default = true`.
+# Declare one section per account. Pick one with `himalaya-tui -a <NAME>`, or
+# let the entry flagged `default = true` be used. The positional argument is
+# not an account name: it seeds the fallback wizard instead.
 [accounts.example]
 
-# Use this account when no account name is passed on the command line.
+# Use this account when `-a` is not passed.
 default = true
 
-# From address used when sending. Also prefills the wizard's SASL/JMAP login.
+# From address used when sending. Also prefills the fallback wizard's SASL and
+# JMAP login prompts.
 # The `--from <EMAIL>` CLI flag overrides this.
 #from = "user@example.com"
 
@@ -168,11 +179,14 @@ default = true
 
 # IMAP server. Either a bare authority (`host[:port]`, treated as
 # `imaps://<authority>` by default), or a full URL with `imap://` (cleartext,
-# optionally upgraded via STARTTLS) or `imaps://` (implicit TLS) scheme.
+# optionally upgraded via STARTTLS), `imaps://` (implicit TLS) or `unix://`
+# (a local pre-authenticated socket proxy such as sirup, over which no SASL
+# is negotiated) scheme. Any other scheme is rejected.
 imap.server = "example.com"
 #imap.server = "imap.example.com:143"
 #imap.server = "imap://example.com:143"
 #imap.server = "imaps://example.com:993"
+#imap.server = "unix:///run/user/1000/sirup/imap.sock"
 
 # TLS provider, defaults to the first available at runtime.
 #imap.tls.provider = "rustls"
@@ -189,7 +203,8 @@ imap.server = "example.com"
 #imap.starttls = false
 
 # ALPN protocol identifiers offered during the TLS handshake (rustls only;
-# native-tls ignores it). Defaults to ["imap"]; set to [] to skip ALPN.
+# native-tls ignores it). Left unset, io-imap own default applies (["imap"]);
+# set to [] to skip ALPN negotiation entirely.
 #imap.alpn = ["imap"]
 #imap.alpn = []
 
@@ -217,7 +232,7 @@ imap.sasl.plain.password.raw = "***"
 # https://datatracker.ietf.org/doc/html/rfc7628
 #imap.sasl.oauthbearer.username = "user@example.com"
 #imap.sasl.oauthbearer.token.raw = "***"
-#imap.sasl.oauthbearer.token.command = ["ortie", "token", "read", "example"]
+#imap.sasl.oauthbearer.token.command = ["ortie", "token", "show", "-a", "example"]
 
 # SASL XOAUTH2 (Google's pre-standard OAuth 2.0 SASL).
 # https://developers.google.com/gmail/imap/xoauth2-protocol
@@ -268,8 +283,9 @@ imap.sasl.plain.password.raw = "***"
 #jmap.tls.rustls.crypto = "ring"
 #jmap.tls.cert = "/path/to/custom/cert.pem"
 
-# ALPN protocol identifiers offered during the TLS handshake. Defaults to
-# ["http/1.1"] (JMAP rides on HTTP/1.1); set to [] to skip ALPN.
+# ALPN protocol identifiers offered during the TLS handshake. Left unset,
+# io-jmap own default applies (["http/1.1"], JMAP riding on HTTP/1.1); set to
+# [] to skip ALPN negotiation entirely.
 #jmap.alpn = ["http/1.1"]
 #jmap.alpn = []
 
@@ -281,7 +297,7 @@ imap.sasl.plain.password.raw = "***"
 
 # OAuth 2.0 / API token bearer.
 #jmap.auth.bearer.token.raw = "***"
-#jmap.auth.bearer.token.command = ["mimosa", "password", "read", "fastmail-api"]
+#jmap.auth.bearer.token.command = ["ortie", "token", "show", "-a", "fastmail"]
 
 # HTTP Basic.
 #jmap.auth.basic.username = "user@example.com"
@@ -312,13 +328,18 @@ imap.sasl.plain.password.raw = "***"
 
 # SMTP server. Either a bare authority (`host[:port]`, treated as
 # `smtps://<authority>` by default), or a full URL with `smtp://` (cleartext,
-# optionally upgraded via STARTTLS) or `smtps://` (implicit TLS) scheme.
-# When an `smtp` block is configured, the composer routes through it on send;
-# otherwise it falls back to JMAP.
+# optionally upgraded via STARTTLS), `smtps://` (implicit TLS) or `unix://`
+# (a local pre-authenticated socket proxy such as sirup, over which no SASL
+# is negotiated) scheme. Any other scheme is rejected.
+#
+# A storage backend that cannot send on its own (IMAP, Maildir, m2dir) routes
+# the composer through this block; JMAP sends on its own and ignores it. The
+# connection opens on the first send, not at startup.
 smtp.server = "example.com"
 #smtp.server = "smtp.example.com:587"
 #smtp.server = "smtp://example.com:587"
 #smtp.server = "smtps://example.com:465"
+#smtp.server = "unix:///run/user/1000/sirup/smtp.sock"
 
 # TLS provider, defaults to the first available at runtime.
 #smtp.tls.provider = "rustls"
@@ -335,7 +356,8 @@ smtp.server = "example.com"
 #smtp.starttls = false
 
 # ALPN protocol identifiers offered during the TLS handshake (rustls only;
-# native-tls ignores it). Defaults to ["smtp"]; set to [] to skip ALPN.
+# native-tls ignores it). Left unset, io-smtp own default applies (["smtp"]);
+# set to [] to skip ALPN negotiation entirely.
 #smtp.alpn = ["smtp"]
 #smtp.alpn = []
 

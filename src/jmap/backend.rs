@@ -145,7 +145,7 @@ impl JmapClient {
         let url = Url::parse(&url_str)
             .map_err(|_| anyhow!("Resolved JMAP download URL is invalid: {url_str}"))?;
 
-        Ok(self.blob_download(&url)?)
+        self.download_blob(&url)
     }
 
     /// Uploads `raw` as a blob then imports it into `mailbox` with the
@@ -282,8 +282,8 @@ impl JmapClient {
     /// Without one, the first identity returned by `Identity/get` (all
     /// ids) is used. Bails when the account exposes none.
     fn resolve_identity_id(&mut self) -> Result<String> {
-        if let Some(id) = &self.identity_id {
-            return Ok(id.clone());
+        if let Some(id) = self.identity_id() {
+            return Ok(id.to_string());
         }
 
         let output = self.identity_get(JmapIdentityGetOptions { ids: None })?;
@@ -302,8 +302,8 @@ impl JmapClient {
     /// Without one, the mailbox whose role is `drafts` (RFC 8621
     /// section 2.1) is used. Bails when the account exposes none.
     fn resolve_drafts_mailbox_id(&mut self) -> Result<String> {
-        if let Some(id) = &self.drafts_mailbox_id {
-            return Ok(id.clone());
+        if let Some(id) = self.drafts_mailbox_id() {
+            return Ok(id.to_string());
         }
 
         let output = self.mailbox_get(JmapMailboxGetOptions {
