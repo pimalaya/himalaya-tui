@@ -13,10 +13,10 @@ use edtui::{
 };
 use mail_parser::MessageParser;
 use mml::{
-    compiler::message::MmlCompilerBuilder,
+    compiler::message::MmlCompileOptions,
     template::{
-        compose::TemplateBuilderCompose, forward::TemplateBuilderForward,
-        reply::TemplateBuilderReply, types::TemplateCursor,
+        MmlTemplateCursor, compose::MmlTemplateComposeBuilder,
+        forward::MmlTemplateForwardBuilder, reply::MmlTemplateReplyBuilder,
     },
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -545,7 +545,7 @@ fn set_status(model: &mut Model, msg: impl Into<String>) {
 }
 
 fn start_compose(model: &mut Model) {
-    let tpl = TemplateBuilderCompose {
+    let tpl = MmlTemplateComposeBuilder {
         from: model.from.clone().unwrap_or_default(),
         from_name: model.from_name.clone(),
         signature: model.signature.clone(),
@@ -565,14 +565,25 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
         return;
     };
 
-    let tpl = TemplateBuilderReply {
+    // NOTE: the builder no longer interprets the source, so the quote
+    // is rendered here. mml carries no PGP backend in this build, so
+    // an encrypted thread quotes as an unresolved marker.
+    let quote = match MmlTemplateReplyBuilder::quote_options().interpret_msg(&msg) {
+        Ok(quote) => quote,
+        Err(err) => {
+            set_status(model, format!("Error rendering the quote: {err}"));
+            return;
+        }
+    };
+
+    let tpl = MmlTemplateReplyBuilder {
         from: model.from.clone().unwrap_or_default(),
         from_name: model.from_name.clone(),
         signature: model.signature.clone(),
         reply_all,
         ..Default::default()
     }
-    .build(&msg);
+    .build(&msg, &quote);
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
@@ -586,13 +597,21 @@ fn start_forward(model: &mut Model, raw_message: &[u8]) {
         return;
     };
 
-    let tpl = TemplateBuilderForward {
+    let quote = match MmlTemplateForwardBuilder::quote_options().interpret_msg(&msg) {
+        Ok(quote) => quote,
+        Err(err) => {
+            set_status(model, format!("Error rendering the quote: {err}"));
+            return;
+        }
+    };
+
+    let tpl = MmlTemplateForwardBuilder {
         from: model.from.clone().unwrap_or_default(),
         from_name: model.from_name.clone(),
         signature: model.signature.clone(),
         ..Default::default()
     }
-    .build(&msg);
+    .build(&msg, &quote);
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
@@ -600,7 +619,7 @@ fn start_forward(model: &mut Model, raw_message: &[u8]) {
     }
 }
 
-fn open_editor_with_template(model: &mut Model, content: &str, cursor: &TemplateCursor) {
+fn open_editor_with_template(model: &mut Model, content: &str, cursor: &MmlTemplateCursor) {
     let mut state = EditorState::new(Lines::from(content));
     state.mode = EditorMode::Insert;
     state.cursor = Index2::new(cursor.row.saturating_sub(1), cursor.col);
@@ -799,22 +818,10 @@ fn do_flag(model: &mut Model, add: bool) {
 fn do_send(model: &mut Model) {
     let content = model.compose_content();
     set_status(model, "Compiling message…");
-    let mime_bytes = match MmlCompilerBuilder::new().build(&content) {
-        Ok(compiler) => match compiler.compile() {
-            Ok(result) => match result.into_vec() {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    set_status(model, format!("Error: {e}"));
-                    return;
-                }
-            },
-            Err(e) => {
-                set_status(model, format!("Compile error: {e}"));
-                return;
-            }
-        },
+    let mime_bytes = match MmlCompileOptions::default().compile(&content) {
+        Ok(bytes) => bytes,
         Err(e) => {
-            set_status(model, format!("Parse error: {e}"));
+            set_status(model, format!("Compile error: {e}"));
             return;
         }
     };
@@ -832,22 +839,14 @@ fn do_send(model: &mut Model) {
 
 fn do_preview(model: &mut Model) {
     let content = model.compose_content();
-    let mime = match MmlCompilerBuilder::new().build(&content) {
-        Ok(compiler) => match compiler.compile() {
-            Ok(result) => match result.into_string() {
-                Ok(s) => s,
-                Err(e) => {
-                    set_status(model, format!("Error: {e}"));
-                    return;
-                }
-            },
-            Err(e) => {
-                set_status(model, format!("Compile error: {e}"));
-                return;
-            }
-        },
+    let mime = match MmlCompileOptions::default()
+        .compile(&content)
+        .map_err(anyhow::Error::from)
+        .and_then(|mime| Ok(String::from_utf8(mime)?))
+    {
+        Ok(mime) => mime,
         Err(e) => {
-            set_status(model, format!("Parse error: {e}"));
+            set_status(model, format!("Compile error: {e}"));
             return;
         }
     };

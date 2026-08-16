@@ -5,6 +5,7 @@
   <p>
     <a href="https://matrix.to/#/#pimalaya:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white"/></a>
     <a href="https://fosstodon.org/@pimalaya"><img alt="Mastodon" src="https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white"/></a>
+    <a href="https://pimalaya.org/sponsor/"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-pink?style=flat&logo=github-sponsors&logoColor=white"/></a>
   </p>
 </div>
 
@@ -27,10 +28,10 @@
   - [Keybindings](#keybindings)
   - [Composing messages](#composing-messages)
 - [Interfaces](#interfaces)
-- [AI disclosure](#ai-disclosure)
+- [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)
-- [Contributing](#contributing)
+- [Contributing](./CONTRIBUTING.md)
 - [Sponsoring](#sponsoring)
 
 ## Features
@@ -177,17 +178,6 @@ Sending routes through SMTP when an `[accounts.<name>.smtp]` block is configured
 
 Himalaya TUI is one of several front-ends to the Pimalaya libraries. See [pimalaya/himalaya#interfaces](https://github.com/pimalaya/himalaya#interfaces) for the full list (CLI, Vim, Emacs, Raycast).
 
-## AI disclosure
-
-This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
-
-- **Tools**: Claude Code (Anthropic), invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
-- **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
-- **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
-- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit. Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
-- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
-- **Last reviewed**: 26/07/2026
-
 ## License
 
 This project is licensed under either of:
@@ -195,17 +185,11 @@ This project is licensed under either of:
 - [MIT license](LICENSE-MIT)
 - [Apache License, Version 2.0](LICENSE-APACHE)
 
-at your option.
-
 ## Social
 
 - Chat on [Matrix](https://matrix.to/#/#pimalaya:matrix.org)
 - News on [Mastodon](https://fosstodon.org/@pimalaya) or [RSS](https://fosstodon.org/@pimalaya.rss)
 - Mail at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net)
-
-## Contributing
-
-Contributions are welcome: start with [CONTRIBUTING.md](./CONTRIBUTING.md), which opens with the Pimalaya-wide guides to read first.
 
 ## Sponsoring
 
@@ -216,9 +200,9 @@ Special thanks to the [NLnet foundation](https://nlnet.nl/) and the [European Co
 - 2022 → 2023: [NGI Assure](https://nlnet.nl/project/Himalaya/)
 - 2023 → 2024: [NGI Zero Entrust](https://nlnet.nl/project/Pimalaya/)
 - 2024 → 2026: [NGI Zero Core](https://nlnet.nl/project/Pimalaya-PIM/)
-- *2027 in preparation…*
+- 2026 → 2027: [NGI Zero Commons Fund](https://nlnet.nl/project/Pimalaya-pimdir/)
 
-If you appreciate the project, feel free to donate using one of the following providers:
+This program is part of Pimalaya, free software funded entirely by grants and donations. If you find it useful, consider [sponsoring](https://pimalaya.org/sponsor/) its development:
 
 [![GitHub](https://img.shields.io/badge/-GitHub%20Sponsors-fafbfc?logo=GitHub%20Sponsors)](https://github.com/sponsors/soywod)
 [![Ko-fi](https://img.shields.io/badge/-Ko--fi-ff5e5a?logo=Ko-fi&logoColor=ffffff)](https://ko-fi.com/soywod)
