@@ -28,8 +28,8 @@ use crate::{
         mailbox::Mailbox,
     },
     tui::model::{
-        BottomPanel, ComposeAction, Dialog, EnvelopeAction, FlagAction, MAILBOX_DIALOG_VISIBLE,
-        Message, Model, Panel,
+        BottomPanel, ComposeAction, Dialog, EnvelopeAction, EnvelopeLanding, FlagAction,
+        MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
     },
 };
 
@@ -61,24 +61,18 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             toggle_panel(model);
             None
         }
-        Message::Next => {
-            next_item(model);
-            None
-        }
-        Message::Previous => {
-            previous_item(model);
-            None
-        }
+        Message::Next => next_item(model),
+        Message::Previous => previous_item(model),
         Message::PageDown => {
             if model.active_panel == Panel::Envelopes && next_envelope_page(model) {
-                Some(Message::LoadEnvelopes)
+                Some(Message::LoadEnvelopes(EnvelopeLanding::First))
             } else {
                 None
             }
         }
         Message::PageUp => {
             if model.active_panel == Panel::Envelopes && prev_envelope_page(model) {
-                Some(Message::LoadEnvelopes)
+                Some(Message::LoadEnvelopes(EnvelopeLanding::First))
             } else {
                 None
             }
@@ -86,7 +80,7 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::Enter => match model.active_panel {
             Panel::Mailboxes => {
                 select_mailbox(model);
-                Some(Message::LoadEnvelopes)
+                Some(Message::LoadEnvelopes(EnvelopeLanding::First))
             }
             Panel::Envelopes => {
                 if model.selected_envelope().is_some() {
@@ -137,8 +131,8 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::DialogConfirm => dialog_confirm(model),
 
         Message::LoadMailboxes => load_mailboxes(model),
-        Message::LoadEnvelopes => {
-            load_envelopes(model);
+        Message::LoadEnvelopes(landing) => {
+            load_envelopes(model, landing);
             None
         }
         Message::ReadSelected => {
@@ -299,7 +293,10 @@ fn toggle_panel(model: &mut Model) {
     };
 }
 
-fn next_item(model: &mut Model) {
+/// Moves one item down, crossing into the next page when the envelope
+/// list runs out: a mailbox is one list to the reader, whatever the
+/// page size cuts it into.
+fn next_item(model: &mut Model) -> Option<Message> {
     match model.active_panel {
         Panel::Mailboxes => {
             if model.mailbox_index + 1 < model.mailboxes.len() {
@@ -309,6 +306,8 @@ fn next_item(model: &mut Model) {
         Panel::Envelopes => {
             if model.envelope_index + 1 < model.envelopes.len() {
                 model.envelope_index += 1;
+            } else if next_envelope_page(model) {
+                return Some(Message::LoadEnvelopes(EnvelopeLanding::First));
             }
         }
         Panel::Message => {
@@ -316,21 +315,31 @@ fn next_item(model: &mut Model) {
         }
         Panel::Compose => {}
     }
+
+    None
 }
 
-fn previous_item(model: &mut Model) {
+/// Moves one item up, crossing into the previous page from the first
+/// envelope and landing on its last, the mirror of [`next_item`].
+fn previous_item(model: &mut Model) -> Option<Message> {
     match model.active_panel {
         Panel::Mailboxes => {
             model.mailbox_index = model.mailbox_index.saturating_sub(1);
         }
         Panel::Envelopes => {
-            model.envelope_index = model.envelope_index.saturating_sub(1);
+            if model.envelope_index > 0 {
+                model.envelope_index -= 1;
+            } else if prev_envelope_page(model) {
+                return Some(Message::LoadEnvelopes(EnvelopeLanding::Last));
+            }
         }
         Panel::Message => {
             model.message_scroll = model.message_scroll.saturating_sub(1);
         }
         Panel::Compose => {}
     }
+
+    None
 }
 
 fn close_current(model: &mut Model) -> bool {
@@ -388,6 +397,26 @@ fn set_mailboxes(model: &mut Model, mailboxes: Vec<Mailbox>) {
         select_mailbox(model);
     }
     model.status_message = None;
+}
+
+/// Adopts the row count the last render measured as the page size, and
+/// returns the load that re-pages the list around the envelope the
+/// cursor is on. `None` when the page already matches the screen,
+/// which is every frame but the first and the ones following a resize.
+pub fn adopt_envelope_capacity(model: &mut Model) -> Option<Message> {
+    let capacity = model.envelope_capacity;
+
+    if capacity == 0 || capacity == model.envelope_page_size || model.selected_mailbox.is_none() {
+        return None;
+    }
+
+    let selected = model.envelope_page * model.envelope_page_size + model.envelope_index;
+    model.envelope_page_size = capacity;
+    model.envelope_page = selected / capacity;
+
+    Some(Message::LoadEnvelopes(EnvelopeLanding::Index(
+        selected % capacity,
+    )))
 }
 
 fn next_envelope_page(model: &mut Model) -> bool {
@@ -643,7 +672,7 @@ fn load_mailboxes(model: &mut Model) -> Option<Message> {
             if was_empty {
                 None
             } else {
-                Some(Message::LoadEnvelopes)
+                Some(Message::LoadEnvelopes(EnvelopeLanding::First))
             }
         }
         Err(err) => {
@@ -653,7 +682,12 @@ fn load_mailboxes(model: &mut Model) -> Option<Message> {
     }
 }
 
-fn load_envelopes(model: &mut Model) {
+/// Loads the current page of the selected mailbox, landing the
+/// selection on the end `landing` names.
+///
+/// The total comes from the backend rather than from the page, which
+/// cannot tell a full page from the end of the mailbox.
+fn load_envelopes(model: &mut Model, landing: EnvelopeLanding) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
@@ -665,14 +699,16 @@ fn load_envelopes(model: &mut Model) {
         .client
         .list_envelopes(&mailbox, page, page_size, false);
     match result {
-        Ok(envelopes) => {
-            // NOTE: the shared API does not yet return a total; we
-            // approximate with the current page length.
-            let total = envelopes.len() as u32;
-            model.envelopes = envelopes;
-            model.envelope_index = 0;
+        Ok(list) => {
+            model.envelopes = list.envelopes;
+            model.envelope_total = list.total;
+            let last = model.envelopes.len().saturating_sub(1);
+            model.envelope_index = match landing {
+                EnvelopeLanding::First => 0,
+                EnvelopeLanding::Last => last,
+                EnvelopeLanding::Index(index) => index.min(last),
+            };
             model.envelope_offset = 0;
-            model.envelope_total = total;
             model.status_message = None;
         }
         Err(e) => set_status(model, format!("Error: {e}")),

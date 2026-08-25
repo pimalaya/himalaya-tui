@@ -22,7 +22,7 @@ use crate::maildir::client::MaildirClient;
 use crate::{
     config::AccountConfig,
     email::{
-        envelope::Envelope,
+        envelope::EnvelopeList,
         flag::{Flag, FlagOp},
         mailbox::Mailbox,
     },
@@ -112,14 +112,15 @@ impl EmailClient {
         }
     }
 
-    /// Lists envelopes from `mailbox`.
+    /// Lists one page of envelopes from `mailbox`, with the total the
+    /// backend reported for it.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
         page: Option<u32>,
         page_size: Option<u32>,
         with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeList> {
         let mailbox = self.resolve_mailbox_id(mailbox)?;
         let mailbox = mailbox.as_str();
 

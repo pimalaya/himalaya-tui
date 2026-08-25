@@ -58,6 +58,12 @@ fn render_main(frame: &mut Frame, model: &mut Model, area: Rect) {
 }
 
 fn render_right_panel(frame: &mut Frame, model: &mut Model, area: Rect) {
+    // NOTE: measured on the whole right panel rather than on the
+    // envelope pane, so opening a message or the composer does not
+    // re-page the list under the cursor: what the page holds follows
+    // the terminal, not what else is on screen.
+    model.envelope_capacity = envelope_capacity(area.height);
+
     match model.bottom_panel {
         BottomPanel::None => {
             render_envelopes(frame, model, area);
@@ -198,7 +204,7 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
                 .map(|m| {
                     let total_pages = model.total_pages();
                     if total_pages > 1 {
-                        format!(" - {} ({}/{})", m, model.envelope_page + 1, total_pages)
+                        format!(" - {m} (page {}/{total_pages})", model.envelope_page + 1)
                     } else {
                         format!(" - {}", m)
                     }
@@ -220,9 +226,8 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
         .block(block)
         .row_highlight_style(model.theme.cursor);
 
-    // Page-style scrolling, as in render_mailboxes; inner height also
-    // subtracts the table header row.
-    let inner_height = area.height.saturating_sub(3) as usize;
+    // Page-style scrolling, as in render_mailboxes.
+    let inner_height = envelope_capacity(area.height);
     if inner_height > 0 {
         if model.envelope_index >= model.envelope_offset + inner_height {
             model.envelope_offset = model.envelope_index;
@@ -238,6 +243,12 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
         state.select(Some(model.envelope_index));
     }
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+/// Envelope rows a panel of `height` can show: its two borders and the
+/// column header above them are not envelopes.
+pub fn envelope_capacity(height: u16) -> usize {
+    height.saturating_sub(3) as usize
 }
 
 fn format_flags(envelope: &Envelope) -> String {

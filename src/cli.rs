@@ -26,6 +26,7 @@ use pimalaya_cli::{
     spinner::Spinner,
 };
 use pimalaya_config::toml::TomlConfig;
+use ratatui::crossterm::terminal;
 use simplelog::WriteLogger;
 use tui_input::Input;
 
@@ -35,7 +36,7 @@ use crate::{
     tui::{
         model::{BottomPanel, Keybinds, Message, Model, Panel},
         theme::Theme,
-        update,
+        update, view,
     },
     wizard,
 };
@@ -224,7 +225,8 @@ impl Cli {
             envelope_index: 0,
             envelope_offset: 0,
             envelope_page: 0,
-            envelope_page_size: 50,
+            envelope_page_size: startup_page_size(),
+            envelope_capacity: 0,
             envelope_total: 0,
             selected_mailbox: None,
             account_name,
@@ -258,6 +260,20 @@ impl Cli {
 
         Ok(model)
     }
+}
+
+/// Envelopes the first page is fetched with, read off the terminal
+/// before there is a frame to measure.
+///
+/// The first render measures the panel itself and re-pages the list if
+/// this missed, so the estimate only has to spare the session a second
+/// listing: the main area is the terminal without its header and status
+/// lines, and the panel fills it. A terminal too small to hold a row,
+/// or one whose size cannot be read at all, still asks for one.
+fn startup_page_size() -> usize {
+    let rows = terminal::size().map(|(_, rows)| rows).unwrap_or_default();
+
+    view::envelope_capacity(rows.saturating_sub(2)).max(1)
 }
 
 /// Assembles the signature block the composer appends: the separator,

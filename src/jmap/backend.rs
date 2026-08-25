@@ -32,7 +32,7 @@ use url::Url;
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeList, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -57,13 +57,17 @@ impl JmapClient {
 
     /// Lists envelopes from `mailbox` (a JMAP mailbox id), batching
     /// `Email/query` + `Email/get` in one round-trip.
+    ///
+    /// The total is the `total` the query answered, RFC 8621 §5.5 making
+    /// it optional even under `calculateTotal`: a server that withholds
+    /// it leaves the page length as the only count available.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
         page: Option<u32>,
         page_size: Option<u32>,
         _with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeList> {
         let (position, limit) = compute_position_limit(page, page_size);
         let filter = JmapEmailFilter {
             in_mailbox: Some(mailbox.to_string()),
@@ -78,7 +82,14 @@ impl JmapClient {
             ..Default::default()
         })?;
 
-        Ok(output.emails.into_iter().map(envelope_from).collect())
+        let envelopes: Vec<Envelope> = output.emails.into_iter().map(envelope_from).collect();
+        let total = output
+            .total
+            .unwrap_or(envelopes.len() as u64)
+            .try_into()
+            .unwrap_or(u32::MAX);
+
+        Ok(EnvelopeList { envelopes, total })
     }
 
     /// Adds, sets, or removes `flags` (JMAP keywords) on an email id

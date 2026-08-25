@@ -37,7 +37,7 @@ use rfc2047_decoder::{Decoder, RecoverStrategy};
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeList, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -79,19 +79,26 @@ impl ImapClient {
 
     /// Lists envelopes from `mailbox`, most recent first. `page = None`
     /// and `page_size = None` fetch the whole mailbox.
+    ///
+    /// The total is the `EXISTS` the SELECT answered, which is also what
+    /// sizes the window: the mailbox says how many messages it holds
+    /// before a single one is fetched.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
         page: Option<u32>,
         page_size: Option<u32>,
         with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeList> {
         let mbox = parse_mailbox(mailbox)?;
         let select = self.select(mbox, ImapMailboxSelectOptions::default())?;
-        let exists = select.exists.unwrap_or(0);
+        let total = select.exists.unwrap_or(0);
 
-        let Some(window) = compute_window(exists, page, page_size) else {
-            return Ok(Vec::new());
+        let Some(window) = compute_window(total, page, page_size) else {
+            return Ok(EnvelopeList {
+                envelopes: Vec::new(),
+                total,
+            });
         };
         let sequence_set: SequenceSet = window
             .as_str()
@@ -110,7 +117,7 @@ impl ImapClient {
             .map(|(seq, items)| envelope_from(seq.get(), items.into_inner()))
             .collect();
 
-        Ok(envelopes)
+        Ok(EnvelopeList { envelopes, total })
     }
 
     /// Adds, sets, or removes `flags` on a UID set in `mailbox`.
@@ -540,4 +547,46 @@ fn decode_mime_bytes(bytes: &[u8]) -> String {
     decoder
         .decode(bytes)
         .unwrap_or_else(|_| bytes_to_string(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_window;
+
+    /// Page 1 is the newest window and each further page steps back by
+    /// one page size, which is what makes a mailbox larger than a page
+    /// reachable at all: the window has to move, not just the count of
+    /// what it returned.
+    #[test]
+    fn each_page_steps_one_window_back() {
+        let page = |n| compute_window(120, Some(n), Some(50));
+
+        assert_eq!(page(1).as_deref(), Some("71:120"));
+        assert_eq!(page(2).as_deref(), Some("21:70"));
+        // The oldest page is short: it stops at the first message
+        // rather than running below it.
+        assert_eq!(page(3).as_deref(), Some("1:20"));
+        assert_eq!(page(4), None, "nothing is left to page into");
+    }
+
+    /// A mailbox holding exactly one page has exactly one page: asking
+    /// for the second must come back empty rather than repeat the
+    /// first, which is what the model counts on to stop paging.
+    #[test]
+    fn an_exactly_full_page_is_the_only_one() {
+        assert_eq!(
+            compute_window(50, Some(1), Some(50)).as_deref(),
+            Some("1:50")
+        );
+        assert_eq!(compute_window(50, Some(2), Some(50)), None);
+    }
+
+    /// An empty mailbox and a zero page size both have no window, and
+    /// no page size at all means the whole mailbox.
+    #[test]
+    fn a_window_needs_messages_and_a_size() {
+        assert_eq!(compute_window(0, Some(1), Some(50)), None);
+        assert_eq!(compute_window(10, Some(1), Some(0)), None);
+        assert_eq!(compute_window(10, Some(1), None).as_deref(), Some("1:*"));
+    }
 }

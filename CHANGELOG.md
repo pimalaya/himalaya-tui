@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Added the three-pane terminal interface: mailboxes, envelopes, and the message body or the composer.
+
+  The envelope list is paged, one screenful at a time, and the page count comes from the total the backend reports for the mailbox: IMAP reads it from `EXISTS`, JMAP from the query `total`, Maildir from the entry count. The panel names the page it is on as `(page n/p)` when there is more than one, a resized terminal re-cuts the page around the selected envelope, and moving past either end of a page loads the next or the previous one, landing on the row the cursor was travelling towards.
 - Added the IMAP, JMAP, SMTP and Maildir backends, each behind its own cargo feature.
 
   Every `server` field takes a full `scheme://` URL or a bare authority carrying an optional port, and rejects a scheme the protocol does not speak. A `unix://` server is a pre-authenticated socket proxy such as sirup, over which no SASL is negotiated. The SMTP transport connects on the first send rather than at startup, and Maildir flags carry the custom keywords named by the `dovecot-keywords` sidecar or by the keywords header.

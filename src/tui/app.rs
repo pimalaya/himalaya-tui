@@ -46,6 +46,12 @@ pub fn run(mut model: Model) -> Result<()> {
 
         terminal.draw(|f| view::render(&mut model, f))?;
 
+        // A page is one screenful, so the render that measured the
+        // screen decides the page size: the first one, and every one
+        // after a resize, re-pages the list around the cursor.
+        let repage = update::adopt_envelope_capacity(&mut model);
+        update::apply_all(&mut model, repage);
+
         if !event::poll(POLL_TIMEOUT)? {
             // Idle tick: keep network backends warm so the server
             // does not drop the connection mid-session.

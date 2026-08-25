@@ -21,7 +21,7 @@ use mail_parser::Address as MailParserAddress;
 use crate::{
     email::{
         address::Address,
-        envelope::{Envelope, normalize_message_id},
+        envelope::{Envelope, EnvelopeList, normalize_message_id},
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
@@ -57,7 +57,7 @@ impl MaildirClient {
         page: Option<u32>,
         page_size: Option<u32>,
         _with_attachment: bool,
-    ) -> Result<Vec<Envelope>> {
+    ) -> Result<EnvelopeList> {
         let maildir = self.resolve_maildir(Path::new(mailbox))?;
         let entries: Vec<_> = self.list_entries(maildir.clone())?.into_iter().collect();
         let fulls = self.read_entries(&maildir, &entries)?;
@@ -65,7 +65,15 @@ impl MaildirClient {
         let mut envelopes: Vec<Envelope> = fulls.iter().map(envelope_from_entry).collect();
         envelopes.sort_by_key(|envelope| Reverse(envelope.date));
 
-        Ok(paginate(envelopes, page, page_size))
+        // NOTE: the whole mailbox is read to answer one page, so the
+        // count is exact and costs nothing more than the read already
+        // paid for.
+        let total = envelopes.len().try_into().unwrap_or(u32::MAX);
+
+        Ok(EnvelopeList {
+            envelopes: paginate(envelopes, page, page_size),
+            total,
+        })
     }
 
     /// Adds, sets, or removes `flags` on a Maildir id set.
@@ -281,6 +289,20 @@ mod tests {
         for flag in flags {
             assert_eq!(flag_to_maildir(&flag_from_maildir(&flag)), flag);
         }
+    }
+
+    /// Pagination is 1-indexed and each page is the next slice, the
+    /// last one short: a mailbox larger than a page is only reachable
+    /// if the slice moves.
+    #[test]
+    fn each_page_is_the_next_slice() {
+        let items: Vec<u8> = (1..=12).collect();
+        let page = |n| paginate(items.clone(), Some(n), Some(5));
+
+        assert_eq!(page(1), [1, 2, 3, 4, 5]);
+        assert_eq!(page(2), [6, 7, 8, 9, 10]);
+        assert_eq!(page(3), [11, 12]);
+        assert!(page(4).is_empty(), "nothing is left to page into");
     }
 
     /// A keyword io-maildir resolved keeps the spelling it was stored

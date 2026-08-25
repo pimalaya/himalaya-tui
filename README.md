@@ -158,6 +158,8 @@ Top-level navigation, supporting Vim and Emacs keybinds:
 | `Esc`, `q`, `Ctrl-g` | Close panel / dialog / quit |
 | `Ctrl-c` | Start a new draft |
 
+The envelope list is paged, one screenful at a time, and the panel names the page it is on when the mailbox holds more than one. A page is therefore never half off screen, and it is re-cut around the selected envelope when the terminal is resized. Moving past either end of a page loads the next or previous one, so a mailbox reads as a single list whichever keys walk it.
+
 Composer:
 
 | Key | Action |

@@ -57,6 +57,20 @@ pub struct Envelope {
     pub has_attachment: Option<bool>,
 }
 
+/// One page of a mailbox listing, with the size of the whole.
+///
+/// The page alone cannot say how much is behind it, and a full one is
+/// indistinguishable from the end of the mailbox, so a listing carries
+/// the count the backend reported beside the envelopes it returned.
+#[derive(Clone, Debug, Default)]
+pub struct EnvelopeList {
+    /// The envelopes on the requested page, newest first.
+    pub envelopes: Vec<Envelope>,
+    /// Messages the mailbox holds, whatever the page size. Falls back
+    /// to the page length for a backend that cannot report one.
+    pub total: u32,
+}
+
 /// Strips RFC 5322 `msg-id` wrappers from the raw `Message-ID:` value
 /// so every backend's [`Envelope::message_id`] is comparable
 /// byte-for-byte. Whitespace and a single pair of angle brackets are

@@ -42,7 +42,15 @@ pub struct Model {
     pub envelope_index: usize,
     pub envelope_offset: usize,
     pub envelope_page: usize,
+    /// Envelopes the current page was fetched with, one screenful of
+    /// them: see [`envelope_capacity`].
+    ///
+    /// [`envelope_capacity`]: Model::envelope_capacity
     pub envelope_page_size: usize,
+    /// Envelope rows a full-height panel can show, measured by the last
+    /// render and zero before it. The page size follows it, so a page
+    /// is exactly what fits on screen and no page is half read.
+    pub envelope_capacity: usize,
     pub envelope_total: u32,
     pub selected_mailbox: Option<String>,
     pub account_name: String,
@@ -280,6 +288,23 @@ impl Keybinds {
     }
 }
 
+/// Which end of a freshly loaded page the selection lands on.
+///
+/// A page reached by moving down is entered from its top, one reached
+/// by moving up from its bottom, so a cursor crossing the boundary
+/// keeps travelling in the direction it was going.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvelopeLanding {
+    /// Select the first envelope of the page.
+    First,
+    /// Select the last envelope of the page.
+    Last,
+    /// Select the envelope at this offset into the page, clamped to
+    /// the last one. Used when a resized page has to keep the cursor
+    /// on the envelope it was on.
+    Index(usize),
+}
+
 /// Every state transition is named here. Raw keys enter as
 /// [`Message::Key`] and are translated to domain variants inside
 /// [`crate::tui::update`].
@@ -312,7 +337,7 @@ pub enum Message {
     Ping,
 
     LoadMailboxes,
-    LoadEnvelopes,
+    LoadEnvelopes(EnvelopeLanding),
     ReadSelected,
     StartReplyToSelected { reply_all: bool },
     StartForwardSelected,
