@@ -104,9 +104,9 @@ Run `himalaya-tui`. With no account to open, the wizard asks for an email addres
 
 A configuration is loaded from the first valid path among:
 
-- $XDG_CONFIG_HOME/himalaya/config.toml
-- $HOME/.config/himalaya/config.toml
-- $HOME/.himalayarc
+- `$XDG_CONFIG_HOME/himalaya/config.toml`
+- `$HOME/.config/himalaya/config.toml`
+- `$HOME/.himalayarc`
 
 These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CLI looks at: one TOML file backs both binaries, starting from himalaya CLI v2. TUI-only fields and CLI-only sections coexist without errors.
 
