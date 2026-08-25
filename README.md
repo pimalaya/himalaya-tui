@@ -12,7 +12,7 @@
 ![screenshot](./screenshot.jpeg)
 
 > [!CAUTION]
-> Himalaya TUI is in active development and currently shipped as `v0.x.x`. Expect breaking changes between releases until stabilization.
+> Himalaya TUI is `v0.x`: expect breaking changes between releases until it stabilises.
 
 ## Table of contents
 
@@ -29,25 +29,26 @@
 
 ## Features
 
-- Remote backend support: **IMAP**, **SMTP**, **JMAP**
-- Local (filesystem) backends support: **Maildir** <sup>[specs](https://cr.yp.to/proto/maildir.html)</sup>, **m2dir** <sup>[specs](https://man.sr.ht/~bitfehler/m2dir/)</sup>
-- **Simple auth** support for IMAP/SMTP: anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256
+- **IMAP**, **SMTP**, **JMAP** support
+- **Maildir** <sup>[specs](https://cr.yp.to/proto/maildir.html)</sup>, **m2dir** <sup>[specs](https://man.sr.ht/~bitfehler/m2dir/)</sup> support
+- **Simple auth** support for IMAP and SMTP (anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256)
 - **HTTP auth** support for JMAP: basic, bearer
 - **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
-- **Discovery** support, searched in parallel:
-  - Fixed provider rules (Google, Microsoft, Fastmail and friends)
+- **Discovery** support:
+  - Known provider rules
   - PACC <sup>[specs](https://datatracker.ietf.org/doc/html/draft-ietf-mailmaint-pacc)</sup>
   - Autoconfiguration (Thunderbird) <sup>[specs](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)</sup>
   - SRV DNS lookups <sup>[rfc6186](https://datatracker.ietf.org/doc/html/rfc6186)</sup>
-  - JMAP session resolve <sup>[rfc8620](https://datatracker.ietf.org/doc/html/rfc8620)</sup>
+  - JMAP session resolution <sup>[rfc8620](https://datatracker.ietf.org/doc/html/rfc8620)</sup>
 - **SOCKS5**, **HTTP** proxy support via `all_proxy`, `https_proxy` and `no_proxy`
-- **Three-pane layout** built on [ratatui](https://ratatui.rs): mailboxes, envelopes, message body or composer
-- **In-app composer** powered by [edtui](https://crates.io/crates/edtui) with system-editor handoff (`Alt-e`)
-- **Color themes**: built-in presets plus per-field overrides in the config (see [Theming](#theming))
-- **Shared configuration file** with `himalaya`: same `[accounts.<name>]` blocks load on both binaries (see [Configuration](#configuration))
+- **Interactive wizard** turning an email address into a tested account, shared with the himalaya CLI
+- **Three-pane layout**: mailboxes, envelopes, message body or composer
+- **In-app composer** with system-editor handoff
+- **Color themes**: built-in presets plus per-field overrides
+- **TOML configuration** shared with the himalaya CLI, with multi-account support
 
 > [!TIP]
 > Himalaya TUI is written in [Rust](https://www.rust-lang.org/) and uses [cargo features](https://doc.rust-lang.org/cargo/reference/features.html) to gate backend support. The default feature set is declared in [Cargo.toml](./Cargo.toml).
@@ -99,7 +100,7 @@ nix run
 
 ## Configuration
 
-Accounts are authored by the wizard, by the [himalaya](https://github.com/pimalaya/himalaya) CLI's identical one, or by hand against [config.sample.toml](./config.sample.toml). There is no `configure` command here: the wizard runs when a session has no account to open, and offers to file what it discovered on the way out.
+Run `himalaya-tui`. With no account to open, the wizard asks for an email address, searches the services reachable from it, prompts the authentication the chosen one advertised, tests the connection, then offers to write the resulting `[accounts.<name>]` block to disk. Declining opens the account for that session alone. Ask for the wizard on a configured run with `--no-config`, or pass an address as the positional argument to answer its first prompt. Discovery resolves DNS through the host's own resolver; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
 
 A configuration is loaded from the first valid path among:
 
@@ -107,30 +108,14 @@ A configuration is loaded from the first valid path among:
 - $HOME/.config/himalaya/config.toml
 - $HOME/.himalayarc
 
-These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CLI looks at: one TOML file backs both binaries, **starting from himalaya CLI v2**. TUI-only fields and CLI-only sections coexist without errors. See [config.sample.toml](./config.sample.toml) for a documented template.
+These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CLI looks at: one TOML file backs both binaries, starting from himalaya CLI v2. TUI-only fields and CLI-only sections coexist without errors.
+
+Override the path with `-c <PATH>` or `HIMALAYA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first one is the base and the rest are deep-merged on top. The full field reference lives in [config.sample.toml](./config.sample.toml).
+
+Pick the account to open with `-a <NAME>`, or let the one flagged `default = true` be used. An unknown name is an error listing the accounts the file does hold.
 
 > [!WARNING]
-> A himalaya CLI v1 configuration file is **not** compatible with himalaya TUI: the v1 schema differs from the v2 one shared with the TUI. Upgrade the CLI to v2 (or rewrite the file using [config.sample.toml](./config.sample.toml)) before pointing the TUI at it.
-
-Override the path with `-c <PATH>` or `HIMALAYA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first one is the base and the rest are deep-merged on top.
-
-Pick the account to open with `-a <NAME>`, or let the one flagged `default = true` be used. An unknown name is an error listing the accounts your file does hold.
-
-### Starting without a configuration
-
-A run that resolves no account falls back to the wizard, which is the himalaya CLI's own, prompt for prompt: one prompt for an email address, a parallel search of every service reachable from it, a pick list of what answered, then the authentication method that service advertised, with its credentials tested before they are accepted. On the way out it offers to write the `[accounts.<name>]` block it built to your configuration file, or to append it to the one already there.
-
-What differs from the CLI is what declining that offer does. The CLI prints the block on stdout, a configuration being all it has to give; here nothing is printed, and the account is opened either way, for that session alone when nothing was written.
-
-You can ask for the wizard outright, in two ways. The positional argument answers its first prompt, so `himalaya-tui you@fastmail.com` skips the account lookup and configures that address, keeping the rest of your file (theme, signature, keybindings). `--no-config` drops the file whole, theme included, and prompts for the address instead. Both skip the welcome, having been asked for, and neither can be combined with `-a`.
-
-It also happens by accident. No configuration file at all is met with a welcome naming the path it was looked for at and an offer to generate an account; a file carrying no default account warns on stderr and goes straight to the prompts, since it usually means a forgotten `default = true`:
-
-```
-✗ Configuration file carries no default account, falling back to the wizard
-```
-
-A server URL (`imaps://mail.example.com`) and a local folder path (`~/Mail`) are accepted wherever the address is, they are just not what the prompt asks for: a URL searches from its host and narrows the results to its scheme, a folder configures the Maildir or m2dir it holds. DNS goes through the host's own resolver, falling back to Cloudflare's `1.1.1.1` over TCP when it finds none; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
+> A himalaya CLI v1 configuration file is not compatible with himalaya TUI: the v1 schema differs from the v2 one shared with the TUI. Upgrade the CLI to v2 (or rewrite the file using [config.sample.toml](./config.sample.toml)) before pointing the TUI at it.
 
 ### Provider recipes
 

@@ -10,24 +10,16 @@
 # paths can be passed at once, separated by `:`; the first one is the base and
 # the rest are deep-merged on top of it. `--no-config` skips on-disk config.
 #
-# A run that resolves no account falls back to a wizard, the `himalaya` CLI's
-# own: it searches the services reachable from an email address, asks which one
-# to use and how to authenticate against it, then offers to write the
-# `[accounts.<name>]` block it built here, or to append it to what is already
-# here. Declining prints nothing and opens the account for that session alone.
-# Ask for it with `himalaya-tui <EMAIL>` (this file still supplies the theme and
-# signature) or with `--no-config` (it does not); it also happens when no file is
-# found or none of the accounts is flagged `default = true`. Its probes resolve
-# DNS through the host's own resolver; override it with
-# `HIMALAYA_DNS_RESOLVER=<URL>`.
+# A run that resolves no account falls back to the wizard, the `himalaya` CLI's
+# own: it discovers an account from an email address, then offers to write the
+# `[accounts.<name>]` block here. Declining opens that account for the session
+# alone. Ask for it with `himalaya-tui <EMAIL>` or with `--no-config`.
 #
-# The path is shared with the `himalaya` CLI: one TOML file backs both
-# binaries. TUI-only fields (`keybinds`, `theme`) and CLI-only sections
-# (`table`, `envelope`, `message`, `attachment`, `account`) coexist without
-# errors. What both binaries compose from is read the same way on each:
-# the signature and its delimiter are spelled alike, and the identity is read
-# under either spelling, `from`/`from-name` here, `email`/`display-name` in the
-# CLI.
+# The path is shared with the `himalaya` CLI: one TOML file backs both binaries.
+# TUI-only fields (`keybinds`, `theme`) and CLI-only sections (`table`,
+# `envelope`, `message`, `attachment`, `account`) coexist without errors. The
+# identity is read under either spelling, `from`/`from-name` here and
+# `email`/`display-name` in the CLI, and written under the CLI's.
 # ================================================================================
 
 # --------------------------------------------------------------------------------

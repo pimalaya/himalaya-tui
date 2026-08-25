@@ -1,25 +1,15 @@
-//! What becomes of the account the wizard discovered.
+//! What becomes of the account [`super::discover`] built: a file to
+//! create, a block to append to the one already there, or nothing.
 //!
-//! The wizard generates, it never edits: it discovers an account from
-//! one prompt (see [`super::discover`]), tests it, then offers to write
-//! the resulting `[accounts.<name>]` table into the configuration file
-//! as a file to create or a block to append. Everything discovery does
-//! not cover is written by hand against the documented sample.
+//! This is the himalaya CLI's `configure` command minus its printing.
+//! Declining the offer prints nothing, where the CLI hands the document
+//! to stdout, a configuration being all it has to give; here the account
+//! is opened either way, for this session alone when nothing was
+//! written. The offer is kept rather than dropped, so that stdout is the
+//! whole of the difference between the two wizards.
 //!
-//! This is the himalaya CLI's `configure` command with one thing taken
-//! out and one put back. Declining the offer prints nothing: the CLI
-//! hands the document to stdout because a configuration file is all it
-//! has to give, whereas here the account is opened either way, for this
-//! session alone when nothing was written. Saving is still offered, so
-//! that the only difference between the two wizards is what reaches
-//! stdout.
-//!
-//! Appending is a plain text append rather than a re-serialization of
-//! the whole file, so comments, ordering and hand-written formatting
-//! come out untouched. Two rules guard it: the account name must be
-//! free, since two `[accounts.<name>]` tables make the whole document
-//! fail to parse, and the generated account claims the default only
-//! when no other account does.
+//! Appending is a plain text append rather than a re-serialization, so
+//! comments, ordering and hand-written formatting come out untouched.
 
 use std::{
     fs::{self, OpenOptions},
@@ -58,8 +48,7 @@ pub fn run(seed: Option<&str>, config_paths: &[PathBuf]) -> Result<(String, Acco
     let name = account_name(&base_name, existing.as_ref());
 
     // NOTE: a second `default = true` would make the account the CLI
-    // picks depend on map ordering, so the generated one claims the
-    // default only when no other account does.
+    // picks depend on map ordering.
     account.default = !existing.as_ref().is_some_and(|config| config.has_default);
 
     offer_to_save(&path, existing.is_some(), &name, &account)?;
@@ -203,11 +192,8 @@ fn append(path: &Path, document: &str) -> Result<()> {
         .open(path)
         .with_context(|| format!("Open the config file {}", path.display()))?;
 
-    // NOTE: appending text keeps every comment and every hand-written
-    // line of the file as they are, which parsing and re-serializing the
-    // whole document would not. The leading newline separates the two
-    // tables, and terminates the last line when the file ends without
-    // one.
+    // NOTE: the leading newline separates the two tables, and terminates
+    // the last line when the file ends without one.
     write!(file, "\n{}", document.trim_end())
         .with_context(|| format!("Append to the config file {}", path.display()))?;
 

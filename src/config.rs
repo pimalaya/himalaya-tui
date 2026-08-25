@@ -347,8 +347,8 @@ impl AccountConfig {
     /// top of its own, and a blank line separates them.
     pub fn render(&self, name: &str) -> Result<String> {
         // NOTE: borrowed rather than built into a `Config`, which would
-        // mean cloning the account to render it. The emitter only looks
-        // for an `accounts` table, so any shape carrying one will do.
+        // mean cloning the account. The emitter only looks for an
+        // `accounts` table, so any shape carrying one will do.
         #[derive(Serialize)]
         struct AccountDocument<'a> {
             accounts: HashMap<&'a str, &'a AccountConfig>,

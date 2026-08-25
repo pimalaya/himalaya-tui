@@ -1,15 +1,12 @@
 //! Best-effort special-use mailbox discovery for the wizard.
 //!
 //! The discovered roles are folded into the generated account as
-//! `mailbox.alias.*`, so the himalaya CLI has an implicit default
-//! mailbox (the `inbox` alias) and known Sent/Drafts/Trash targets
-//! without the user hand-editing backend ids. The TUI resolves a
-//! mailbox by name against the live listing and needs none of it, but
-//! the two binaries share one file and the block is written once.
+//! `mailbox.alias.*`, which the himalaya CLI addresses mailboxes by.
+//! The TUI resolves a mailbox by name against the live listing and
+//! needs none of it, but one file backs both binaries.
 //!
-//! Discovery reuses the connection opened for the account test (never a
-//! second one) and never fails the wizard: an inconclusive listing just
-//! yields fewer aliases.
+//! Discovery reuses the connection opened for the account test and
+//! never fails the wizard: an inconclusive listing yields fewer aliases.
 
 use std::collections::HashMap;
 

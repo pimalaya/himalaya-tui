@@ -48,9 +48,10 @@ pub fn configure_discovered(
     Ok((config, aliases))
 }
 
-/// Connects to JMAP — the connection test — and best-effort discovers the
-/// role-based mailbox aliases on the same session. A failed connection is
-/// the wizard's error; a failed listing only means fewer aliases.
+/// Connects to JMAP, which is the connection test, and best-effort
+/// discovers the role-based mailbox aliases on the same session. A failed
+/// connection is the wizard's error; a failed listing only means fewer
+/// aliases.
 fn test_and_discover(config: &JmapConfig) -> Result<HashMap<String, String>> {
     let spinner = Spinner::start("Testing JMAP connection");
 

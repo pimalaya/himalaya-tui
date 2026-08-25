@@ -1,6 +1,7 @@
-//! Clap-driven CLI surface and the bridge into the TUI: [`Cli::try_into_tui_model`]
-//! turns parsed flags + on-disk config (or the wizard) into a ready-to-run
-//! [`Model`], applying CLI overrides last.
+//! Clap-driven CLI surface and the bridge into the TUI:
+//! [`Cli::try_into_tui_model`] turns the parsed flags and the on-disk
+//! configuration, or the wizard, into a ready-to-run [`Model`], applying
+//! the CLI overrides last.
 
 use std::{
     env::temp_dir,
@@ -131,19 +132,16 @@ impl Cli {
             })?,
         )?;
 
-        // NOTE: a seed and `--no-config` ask for the wizard outright, so
-        // the account lookup is skipped and the wizard goes straight to
-        // its prompts. It also runs when that lookup finds nothing, and
-        // there it introduces itself first: `welcome` carries the path
-        // the missing file was looked for at, `wizard_reason` the
-        // mistake the user can fix.
+        // NOTE: a run that asked for the wizard skips the account lookup
+        // and goes straight to its prompts. One that falls back to it
+        // says why: `welcome` carries the path a missing file was looked
+        // for at, `wizard_reason` the mistake the user can fix.
         let asked_for_wizard = self.no_config || self.seed.is_some();
         let mut welcome = None;
         let mut wizard_reason = None;
 
         // NOTE: a seed keeps the file for its globals (theme, signature,
-        // keybindings) and only swaps the account out; `--no-config`
-        // drops the file whole.
+        // keybindings) and only swaps the account out.
         let loaded = if self.no_config {
             None
         } else {
@@ -152,10 +150,6 @@ impl Cli {
             if loaded.is_none() && !asked_for_wizard {
                 let path = Config::target_path(&self.config_paths)?;
 
-                // NOTE: `-a` addresses the file and nothing else, so a
-                // file that is not there cannot answer it. Falling back
-                // would silently open something other than what was
-                // asked for.
                 if let Some(name) = &self.account {
                     bail!(
                         "No account `{name}`: there is no configuration file at {}",
@@ -197,8 +191,6 @@ impl Cli {
 
         let (account_name, mut account_config) = match account {
             Some(named) => named,
-            // No stored account to run on, so the wizard builds one. The
-            // seed answers its first prompt when one was given.
             None => {
                 match wizard_reason {
                     Some(reason) => spinner.failure(reason),
@@ -300,9 +292,8 @@ fn run_wizard(
     seed: Option<&str>,
     config_paths: &[PathBuf],
 ) -> Result<(String, AccountConfig)> {
-    // NOTE: nobody is there to answer a prompt without a terminal, so
-    // the offer is skipped rather than raised and left unanswered; the
-    // wizard itself fails on the same condition, naming it.
+    // NOTE: nobody answers a prompt without a terminal, and the wizard
+    // fails on that condition naming it.
     if let Some(path) = welcome.filter(|_| stdin().is_terminal()) {
         wizard::configure::print_welcome(path);
 

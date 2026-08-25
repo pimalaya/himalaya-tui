@@ -28,9 +28,6 @@ use crate::{
     },
 };
 
-// NOTE: the mechanisms split by credential kind, a password family
-// (login + secret) and a token family (login + API token); ANONYMOUS
-// carries none.
 const PLAIN: &str = "PLAIN (username + password)";
 const LOGIN: &str = "LOGIN (username + password)";
 const SCRAM_SHA_256: &str = "SCRAM-SHA-256 (username + password)";
@@ -40,8 +37,8 @@ const XOAUTH2: &str = "XOAUTH2 (username + API token)";
 
 /// Configures IMAP + SMTP from a discovered entry: pick the SASL
 /// mechanism and credentials for IMAP, test the connection, then ask
-/// whether SMTP reuses them — configuring a distinct SASL when it does
-/// not — and test SMTP last. Both connections are validated here, so the
+/// whether SMTP reuses them, configuring a distinct SASL when it does
+/// not, and test SMTP last. Both connections are validated here, so the
 /// caller skips the final account test. Returns the discovered
 /// `mailbox.alias.*` entries (the IMAP inbox) alongside the configs.
 pub fn configure_discovered(
@@ -71,14 +68,12 @@ pub fn configure_discovered(
     let imap = imap_config(imap, imap_sasl.clone());
     test_connection("IMAP", || check::connect_imap(&imap))?;
 
-    // NOTE: IMAP has no reliable special-use listing yet (see the mailbox
-    // module), so only the always-present INBOX is pinned as the default.
     let aliases = mailbox::imap_aliases();
 
     // The wizard never invents an SMTP host: when discovery found no
     // submission endpoint, the account stays IMAP-only and the user adds
     // SMTP by hand. Otherwise configure and test it, reusing the IMAP
-    // credential unless the user opts for a distinct one — IMAP and SMTP
+    // credential unless the user opts for a distinct one, IMAP and SMTP
     // may advertise different auth. SMTP advertises its auth over EHLO,
     // not the IMAP CAPABILITY probe, so its mechanism list stays keyed on
     // discovery (probed = None), unlike the IMAP side above.
@@ -212,10 +207,9 @@ fn build_sasl(
             })
         }
         SaslMechanism::Anonymous => unreachable!("handled above"),
-        // NOTE: io-sasl knows more mechanisms than the config can
-        // express, and the wizard only ever offers the six above, so
-        // this arm is unreachable through the menu. It bails rather
-        // than panics in case a caller hands one over directly.
+        // NOTE: io-sasl knows mechanisms the config cannot express, and
+        // the menu offers none of them; this bails rather than panics in
+        // case a caller hands one over directly.
         other => bail!("Unsupported SASL mechanism `{}`", mechanism_name(&other)),
     })
 }

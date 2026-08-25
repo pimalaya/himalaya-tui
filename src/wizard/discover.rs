@@ -1,31 +1,21 @@
 //! Account discovery, the half of the wizard that decides what the
-//! account is.
-//!
-//! What becomes of the discovered account, a file to create, a block to
-//! append or a session to open, belongs to [`super::configure`], which
-//! is also where the welcome and the prompts around this one live.
+//! account is. What becomes of it belongs to [`super::configure`].
 //!
 //! One prompt takes an email address, a server URL, or a local folder
-//! path, and its shape orients the setup, the same way the himalaya
-//! CLI's wizard does:
+//! path, and its shape orients the setup:
 //!
-//! - an email (or bare domain) runs io-pim-discovery's parallel
-//!   discovery (see [`super::search`]) and every reachable service
-//!   becomes one selectable configuration; picking one then prompts its
-//!   authentication method (SASL mechanism or HTTP scheme) among those
-//!   advertised;
-//! - a `scheme://` URL discovers from its host, its scheme narrowing the
+//! - an email (or bare domain) runs io-pim-discovery's parallel search
+//!   (see [`super::search`]) and every reachable service becomes one
+//!   selectable configuration, whose authentication method is picked in
+//!   a second prompt among those advertised;
+//! - a `scheme://` URL searches from its host, its scheme narrowing the
 //!   results (`imap(s)` to IMAP + SMTP, an HTTP-family scheme to JMAP);
 //! - an existing folder is a local Maildir or m2dir.
 //!
-//! The wizard only configures what it can discover automatically. When
-//! discovery finds nothing for the given input it stops and points at
-//! the documented sample, rather than prompting for a hand-entered
-//! config.
-//!
-//! himalaya-tui runs no OAuth 2.0 grant itself: a grant only unlocks the
-//! external token brokers (Ortie, pizauth, oama) behind the API token
-//! credential prompt (see [`super::secret`]).
+//! Only what discovery covers is configured: an input it finds nothing
+//! for stops the wizard and points at the documented sample. No OAuth
+//! 2.0 grant is run here either, a grant only unlocking the external
+//! token brokers behind the API token prompt (see [`super::secret`]).
 
 use std::{collections::HashMap, path::Path};
 
@@ -98,8 +88,8 @@ pub fn run(seed: Option<&str>) -> Result<(String, AccountConfig)> {
         bail!("Empty input: enter an email address, a server URL, or a folder path");
     }
 
-    // NOTE: the account name is just the TOML table key, so it is derived
-    // from the input rather than prompted; the user renames it by hand.
+    // NOTE: the name is just the TOML table key, so it is derived rather
+    // than prompted; the user renames it by hand.
     let account_name = default_account_name(input);
     let (account, tested) = build_account(&account_name, input)?;
 
@@ -181,16 +171,11 @@ fn build_account(account_name: &str, input: &str) -> Result<(AccountConfig, bool
         Chosen::M2dir(m2dir) => account.m2dir = Some(m2dir),
     }
 
-    // NOTE: the discovered special-use aliases are the himalaya CLI's
-    // way of addressing a mailbox without hand-editing ids; the TUI
-    // resolves names live and reads none of them, but one file backs
-    // both binaries.
+    // NOTE: the aliases are the himalaya CLI's way of addressing a
+    // mailbox; the TUI resolves names live and reads none of them, but
+    // one file backs both binaries.
     account.mailbox.aliases = aliases;
 
-    // NOTE: an address is the one thing the prompt may already have
-    // been answered with, so the composer gets its `From` without the
-    // user writing it down twice. The name it carries is not
-    // discoverable, and is left to be added by hand.
     account.from = prompted_email(input).map(ToString::to_string);
 
     Ok((account, tested))
@@ -334,8 +319,8 @@ fn retain_supported(found: &mut Vec<Discovered>) {
     found.retain(|entry| match entry.kind {
         DiscoveredKind::ImapSmtp { .. } => cfg!(all(feature = "imap", feature = "smtp")),
         DiscoveredKind::Jmap(_) => cfg!(feature = "jmap"),
-        // NOTE: the proprietary APIs are the himalaya CLI's; this binary
-        // reaches a Google or Microsoft account over IMAP + SMTP.
+        // NOTE: this binary reaches a Google or Microsoft account over
+        // IMAP + SMTP, the proprietary APIs being the CLI's.
         DiscoveredKind::Gmail | DiscoveredKind::Msgraph => false,
     });
 }
