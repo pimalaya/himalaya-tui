@@ -10,23 +10,24 @@
 # paths can be passed at once, separated by `:`; the first one is the base and
 # the rest are deep-merged on top of it. `--no-config` skips on-disk config.
 #
-# himalaya-tui reads this file, it never writes it. Author an account with the
-# `himalaya` CLI wizard, which proposes an `[accounts.<name>]` table to paste
-# here, or by hand from this template.
-#
-# A run that resolves no account falls back to a wizard that discovers
-# IMAP/SMTP/JMAP settings via PACC, Thunderbird Autoconfiguration and RFC 6186
-# SRV, and keeps the result in memory for that session alone. It proposes
-# nothing for this file. Ask for it with `himalaya-tui <EMAIL>` (this file still
-# supplies the theme and signature) or with `--no-config` (it does not); it also
-# happens, with a warning, when no file is found or none of the accounts is
-# flagged `default = true`. Its probes resolve DNS through the host's own
-# resolver; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
+# A run that resolves no account falls back to a wizard, the `himalaya` CLI's
+# own: it searches the services reachable from an email address, asks which one
+# to use and how to authenticate against it, then offers to write the
+# `[accounts.<name>]` block it built here, or to append it to what is already
+# here. Declining prints nothing and opens the account for that session alone.
+# Ask for it with `himalaya-tui <EMAIL>` (this file still supplies the theme and
+# signature) or with `--no-config` (it does not); it also happens when no file is
+# found or none of the accounts is flagged `default = true`. Its probes resolve
+# DNS through the host's own resolver; override it with
+# `HIMALAYA_DNS_RESOLVER=<URL>`.
 #
 # The path is shared with the `himalaya` CLI: one TOML file backs both
-# binaries. TUI-only fields (`display-name`, `signature`, `signature-delim`,
-# `from`, `from-name`, `keybinds`) and CLI-only sections (`table`, `envelope`,
-# `mailbox`, `message`, `attachment`, `account`) coexist without errors.
+# binaries. TUI-only fields (`keybinds`, `theme`) and CLI-only sections
+# (`table`, `envelope`, `message`, `attachment`, `account`) coexist without
+# errors. What both binaries compose from is read the same way on each:
+# the signature and its delimiter are spelled alike, and the identity is read
+# under either spelling, `from`/`from-name` here, `email`/`display-name` in the
+# CLI.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -37,11 +38,14 @@
 # not override it.
 #display-name = "Example"
 
-# Default signature appended to outgoing drafts.
-#signature = "Regards,\n"
+# Default signature appended to outgoing drafts. The value is the signature
+# alone: the separator introducing it is `signature-delim` below, so the same
+# value reads the same under the himalaya CLI.
+#signature = "Regards,\nExample"
 
 # Signature delimiter inserted between the body and the signature. Defaults to
-# the RFC 3676 `"-- \n"` separator.
+# the RFC 3676 `"-- \n"` separator, and is written verbatim, so a delimiter
+# meant to stand on its own line carries its own trailing newline.
 #signature-delim = "-- \n"
 
 # Default download directory for attachments. Falls back to `$TMPDIR`.
@@ -153,24 +157,34 @@
 
 # Declare one section per account. Pick one with `himalaya-tui -a <NAME>`, or
 # let the entry flagged `default = true` be used. The positional argument is
-# not an account name: it seeds the fallback wizard instead.
+# not an account name: it answers the wizard's first prompt instead.
 [accounts.example]
 
 # Use this account when `-a` is not passed.
 default = true
 
-# From address used when sending. Also prefills the fallback wizard's SASL and
-# JMAP login prompts.
+# From address used when sending. The wizard writes it when its prompt was
+# answered with an address.
 # The `--from <EMAIL>` CLI flag overrides this.
+# Also spelled `email`, the key the himalaya CLI writes; both binaries read
+# both, one file backing the two.
 #from = "user@example.com"
 
 # From display name. The `--from-name <NAME>` CLI flag overrides this.
+# Also spelled `display-name`, the key the himalaya CLI writes.
 #from-name = "Example User"
 
 # Per-account overrides for the global options above.
-#signature = "Best,\nExample User\n"
+#signature = "Best,\nExample User"
 #signature-delim = "-- \n"
 #downloads-dir = "~/downloads/example"
+
+# Mailbox aliases mapping a friendly name to a backend-native id, written by
+# the wizard from what the server reported. Read by the `himalaya` CLI, which
+# addresses a mailbox by id; inert here, the TUI resolving a name against the
+# live listing before every dispatch.
+#mailbox.alias.inbox = "INBOX"
+#mailbox.alias.drafts = "Drafts"
 
 # --------------------------------------------------------------------------------
 # IMAP config

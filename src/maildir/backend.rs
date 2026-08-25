@@ -7,7 +7,7 @@
 //! types; the conversion is lifted from the retired io-email Maildir
 //! drivers.
 
-use std::{cmp::Reverse, collections::BTreeSet, path::Path};
+use std::{cmp::Reverse, path::Path};
 
 use anyhow::Result;
 use chrono::DateTime;
@@ -15,7 +15,6 @@ use io_maildir::{
     entry::MaildirFullEntry,
     flag::{MaildirFlag, MaildirFlags},
     maildir::{Maildir, MaildirSubdir},
-    path::MaildirFsPath,
 };
 use mail_parser::Address as MailParserAddress;
 
@@ -60,8 +59,8 @@ impl MaildirClient {
         _with_attachment: bool,
     ) -> Result<Vec<Envelope>> {
         let maildir = self.resolve_maildir(Path::new(mailbox))?;
-        let entries: Vec<_> = self.list_entries(maildir)?.into_iter().collect();
-        let fulls = self.read_entries(&entries)?;
+        let entries: Vec<_> = self.list_entries(maildir.clone())?.into_iter().collect();
+        let fulls = self.read_entries(&maildir, &entries)?;
 
         let mut envelopes: Vec<Envelope> = fulls.iter().map(envelope_from_entry).collect();
         envelopes.sort_by_key(|envelope| Reverse(envelope.date));
@@ -143,10 +142,10 @@ fn mailbox_from(maildir: Maildir) -> Mailbox {
 }
 
 /// Folds a fully-read Maildir entry into a shared [`Envelope`], parsing
-/// the RFC 5322 headers and reading flags from the filename.
+/// the RFC 5322 headers and mapping the flags io-maildir resolved.
 fn envelope_from_entry(entry: &MaildirFullEntry) -> Envelope {
     let id = entry.id().unwrap_or_default().to_string();
-    let flags = parse_filename_flags(entry.path());
+    let flags = entry.flags().iter().map(flag_from_maildir).collect();
     let size = entry.contents().len() as u64;
     let parsed = entry.parsed();
 
@@ -193,17 +192,6 @@ fn envelope_from_entry(entry: &MaildirFullEntry) -> Envelope {
     }
 }
 
-/// IANA flags from a Maildir filename's info section.
-fn parse_filename_flags(path: &MaildirFsPath) -> BTreeSet<Flag> {
-    let Some(name) = path.file_name() else {
-        return BTreeSet::new();
-    };
-    let Some((_, letters)) = name.rsplit_once(',') else {
-        return BTreeSet::new();
-    };
-    letters.chars().filter_map(flag_from_char).collect()
-}
-
 /// mail-parser address group to a shared [`Address`] list.
 fn addresses_from(addrs: &MailParserAddress<'_>) -> Vec<Address> {
     addrs
@@ -240,17 +228,17 @@ fn flags_to_maildir(flags: &[Flag]) -> MaildirFlags {
     flags.iter().map(flag_to_maildir).collect()
 }
 
-/// Maildir info-section letter (S/R/F/D/T/P) to a shared [`Flag`];
-/// `None` for letters outside the standard six.
-fn flag_from_char(c: char) -> Option<Flag> {
-    match c {
-        'S' => Some(Flag::from_iana(IanaFlag::Seen)),
-        'R' => Some(Flag::from_iana(IanaFlag::Answered)),
-        'F' => Some(Flag::from_iana(IanaFlag::Flagged)),
-        'D' => Some(Flag::from_iana(IanaFlag::Draft)),
-        'T' => Some(Flag::from_iana(IanaFlag::Deleted)),
-        'P' => Some(Flag::from_iana(IanaFlag::Forwarded)),
-        _ => None,
+/// Maps a [`MaildirFlag`] back to a shared [`Flag`]; a dovecot or
+/// header keyword comes back as the raw flag it was stored under.
+fn flag_from_maildir(flag: &MaildirFlag) -> Flag {
+    match flag {
+        MaildirFlag::Seen => Flag::from_iana(IanaFlag::Seen),
+        MaildirFlag::Replied => Flag::from_iana(IanaFlag::Answered),
+        MaildirFlag::Flagged => Flag::from_iana(IanaFlag::Flagged),
+        MaildirFlag::Draft => Flag::from_iana(IanaFlag::Draft),
+        MaildirFlag::Trashed => Flag::from_iana(IanaFlag::Deleted),
+        MaildirFlag::Passed => Flag::from_iana(IanaFlag::Forwarded),
+        MaildirFlag::Keyword(keyword) => Flag::from_raw(keyword),
     }
 }
 
@@ -269,4 +257,42 @@ fn paginate<T>(items: Vec<T>, page: Option<u32>, page_size: Option<u32>) -> Vec<
         return Vec::new();
     }
     items.into_iter().skip(skip).take(size as usize).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two mappings are each other's inverse, keyword included, so
+    /// a flag read off disk and written back lands on the same letter
+    /// or the same dovecot slot.
+    #[test]
+    fn maildir_flags_round_trip_through_the_shared_flag() {
+        let flags = [
+            MaildirFlag::Seen,
+            MaildirFlag::Replied,
+            MaildirFlag::Flagged,
+            MaildirFlag::Draft,
+            MaildirFlag::Trashed,
+            MaildirFlag::Passed,
+            MaildirFlag::keyword("NonJunk"),
+        ];
+
+        for flag in flags {
+            assert_eq!(flag_to_maildir(&flag_from_maildir(&flag)), flag);
+        }
+    }
+
+    /// A keyword io-maildir resolved keeps the spelling it was stored
+    /// under, whether or not IANA knows the name.
+    #[test]
+    fn a_resolved_keyword_keeps_its_wire_spelling() {
+        let junk = flag_from_maildir(&MaildirFlag::keyword("$Junk"));
+        assert_eq!(junk.raw(), "$Junk");
+        assert_eq!(junk.iana(), Some(IanaFlag::Junk));
+
+        let custom = flag_from_maildir(&MaildirFlag::keyword("NonJunk"));
+        assert_eq!(custom.raw(), "NonJunk");
+        assert_eq!(custom.iana(), None);
+    }
 }

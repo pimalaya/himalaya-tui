@@ -39,11 +39,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
-io-imap = { version = "0.5", default-features = false, optional = true }
+io-imap = { version = "0.6", default-features = false, optional = true }
 io-jmap = { version = "0.3", default-features = false, optional = true }
 io-m2dir = { version = "0.2", default-features = false, optional = true }
-io-maildir = { version = "0.2", default-features = false, optional = true }
-io-pim-discovery = { version = "0.7", default-features = false, features = ["pacc", "autoconfig", "rfc6186"] }
+io-maildir = { version = "0.3", default-features = false, optional = true }
+io-pim-discovery = { version = "0.7", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "rfc8620"] }
 io-sasl = { version = "0.1", default-features = false, features = ["scram"] }
 io-smtp = { version = "0.3", default-features = false, optional = true }
 log = "0.4"
@@ -56,6 +56,7 @@ ratatui = { version = "0.30", features = ["serde"] }
 rfc2047-decoder = "1"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
+shellexpand = "3.1"
 simplelog = "0.12"
 toml = "1.1"
 tui-input = { version = "0.15", default-features = false }
@@ -65,7 +66,4 @@ url = { version = "2.2", features = ["serde"] }
 uds_windows = "1"
 
 [patch.crates-io]
-# NOTE: the composer targets the post-1.1.1 mml API (MmlCompileOptions,
-# the template builders taking a rendered quote); drop this once mml
-# ships a release carrying it.
 mime-meta-language.git = "https://github.com/pimalaya/mml"

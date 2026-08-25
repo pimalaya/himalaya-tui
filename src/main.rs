@@ -10,7 +10,8 @@
 //!
 //! The network backends are io-imap, io-jmap and io-smtp; the local
 //! storage backends are io-maildir and io-m2dir. Account discovery comes
-//! from io-pim-discovery (Mozilla autoconfig, PACC, RFC 6186 SRV). The
+//! from io-pim-discovery, which searches provider rules, PACC, Mozilla
+//! autoconfig, RFC 6186 SRV and the RFC 8620 JMAP resolve in parallel. The
 //! terminal, prompt and wizard primitives, the TOML config loading and
 //! the blocking stream runtime come from pimalaya-cli, pimalaya-config
 //! and pimalaya-stream; message composition uses mml. Every backend sits
@@ -45,11 +46,11 @@
 //! (completions, manuals), otherwise builds the [`tui::model::Model`]
 //! and hands it to [`tui::app::run`].
 //!
-//! The account it runs on comes from the configuration file, which the
-//! himalaya CLI authors and the TUI only reads: there is no `configure`
-//! command here and nothing is ever written to disk. When that file
-//! resolves no account, [`wizard`] fills the gap with a throwaway
-//! account that lives for the session alone.
+//! The account it runs on comes from the configuration file, shared
+//! with the himalaya CLI. When that file resolves no account,
+//! [`wizard`] fills the gap: the CLI's own flow, prompt for prompt,
+//! offering on the way out to file what it discovered. The account is
+//! opened either way, for the session alone when nothing was written.
 
 mod cli;
 mod config;
@@ -66,7 +67,6 @@ mod shared;
 #[cfg(feature = "smtp")]
 mod smtp;
 mod tui;
-#[cfg(all(feature = "imap", feature = "smtp", feature = "jmap"))]
 mod wizard;
 
 use clap::Parser;

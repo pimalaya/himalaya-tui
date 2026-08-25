@@ -1,495 +1,469 @@
-//! Interactive wizard building an in-memory account to run on.
+//! Account discovery, the half of the wizard that decides what the
+//! account is.
 //!
-//! This is not the himalaya CLI's wizard and does not do its job. The
-//! CLI's wizard authors a configuration: it proposes an
-//! `[accounts.<name>]` table for the user's file, and the account
-//! outlives the run. The TUI writes no configuration of its own and
-//! authors no account, since it reads the file the CLI already wrote.
-//! What this wizard produces is a throwaway [`AccountConfig`] that
-//! exists for the current session only, so a run with nothing to open
-//! still has something to open.
+//! What becomes of the discovered account, a file to create, a block to
+//! append or a session to open, belongs to [`super::configure`], which
+//! is also where the welcome and the prompts around this one live.
 //!
-//! It therefore runs only when the session has no account to start on,
-//! which happens four ways (see [`crate::cli`]). Two ask for it: the
-//! positional argument seeds it, skipping the account lookup outright,
-//! and `--no-config` drops the file whole and prompts instead. Two are
-//! accidents and warn first: no configuration file was found at the
-//! default paths or at the one `-c` named, or the file that was found
-//! carries no default account. Picking a stored account is `-a`'s job,
-//! and an unknown name there is an error rather than a way in here.
+//! One prompt takes an email address, a server URL, or a local folder
+//! path, and its shape orients the setup, the same way the himalaya
+//! CLI's wizard does:
 //!
-//! Being a fallback rather than an authoring tool is what shapes the
-//! flow: it asks the fewest questions that yield a usable session, so
-//! the probes run in series and the first hit wins, with no picker to
-//! arbitrate between reachable services.
+//! - an email (or bare domain) runs io-pim-discovery's parallel
+//!   discovery (see [`super::search`]) and every reachable service
+//!   becomes one selectable configuration; picking one then prompts its
+//!   authentication method (SASL mechanism or HTTP scheme) among those
+//!   advertised;
+//! - a `scheme://` URL discovers from its host, its scheme narrowing the
+//!   results (`imap(s)` to IMAP + SMTP, an HTTP-family scheme to JMAP);
+//! - an existing folder is a local Maildir or m2dir.
 //!
-//! 1. Ask once for an email address (a server URL or a local folder
-//!    path are accepted too).
-//! 2. If the input is a `file://` URL: validate the Maildir root, ask
-//!    for the `From:` address, done.
-//! 3. If the input is another URL: scheme picks the protocol; host,
-//!    port and TLS come straight from the URL, no confirmation
-//!    prompt.
-//! 4. If the input is a domain or email: probe PACC → (Autoconfig ISP
-//!    when an email was given) → Autoconfig ISP-fallback → Autoconfig
-//!    ISPDB → RFC 6186 SRV in that order. The first successful probe
-//!    wins; if it carries a JMAP endpoint, JMAP is preferred over the
-//!    IMAP+SMTP pair.
-//! 5. Ask straight for the SASL (IMAP/SMTP) or HTTP (JMAP)
-//!    authentication mechanism and only the parameters that mechanism
-//!    needs.
-//! 6. Return the assembled [`AccountConfig`]. Nothing is written to
-//!    disk; the secret is kept in a `secrecy` wrapper ([`Secret::Raw`]),
-//!    typed via a single masked prompt with no confirmation. The live
-//!    connection is opened later by the caller from this config.
+//! The wizard only configures what it can discover automatically. When
+//! discovery finds nothing for the given input it stops and points at
+//! the documented sample, rather than prompting for a hand-entered
+//! config.
+//!
+//! himalaya-tui runs no OAuth 2.0 grant itself: a grant only unlocks the
+//! external token brokers (Ortie, pizauth, oama) behind the API token
+//! credential prompt (see [`super::secret`]).
 
-use std::{env, path::PathBuf};
+use std::{collections::HashMap, path::Path};
 
-use anyhow::{Result, anyhow, bail};
-use io_pim_discovery::shared::dns::system_resolver;
-use pimalaya_cli::{
-    prompt,
-    wizard::{
-        imap::{Encryption as ImapEncryption, WizardImapConfig},
-        jmap::WizardJmapConfig,
-        smtp::{Encryption as SmtpEncryption, WizardSmtpConfig},
-    },
-};
-use pimalaya_config::secret::Secret;
-use pimalaya_stream::tls::{Rustls, Tls};
-use secrecy::SecretString;
+use anyhow::{Context, Result, bail};
+#[cfg(all(feature = "imap", feature = "smtp"))]
+use io_pim_discovery::compose::config::DiscoverySecurity;
+use pimalaya_cli::{prompt, spinner::Spinner};
 use url::Url;
 
+#[cfg(feature = "jmap")]
+use crate::config::JmapConfig;
+#[cfg(feature = "m2dir")]
+use crate::config::M2dirConfig;
+#[cfg(feature = "maildir")]
+use crate::config::MaildirConfig;
+#[cfg(all(feature = "imap", feature = "smtp"))]
+use crate::config::{ImapConfig, SmtpConfig};
+#[cfg(all(feature = "imap", feature = "smtp"))]
+use crate::wizard::imap_smtp;
+#[cfg(feature = "jmap")]
+use crate::wizard::jmap;
+#[cfg(any(feature = "maildir", feature = "m2dir"))]
+use crate::wizard::local;
 use crate::{
-    config::{
-        AccountConfig, ImapConfig, JmapAuthConfig, JmapConfig, M2dirConfig, MaildirConfig,
-        SaslAnonymousConfig, SaslConfig, SaslLoginConfig, SaslOauthbearerConfig, SaslPlainConfig,
-        SaslScramSha256Config, SaslXoauth2Config, SmtpConfig,
+    config::AccountConfig,
+    wizard::{
+        check,
+        search::{self, Discovered, DiscoveredKind},
     },
-    wizard::{autoconfig, pacc, srv},
 };
 
-/// DNS-over-TCP resolver backing discovery when `HIMALAYA_DNS_RESOLVER`
-/// is unset and no system resolver is found: Cloudflare's `1.1.1.1`.
-const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
+/// The documented sample configuration, shown in the welcome banner and
+/// pointed at when discovery finds nothing to configure automatically.
+pub const CONFIG_SAMPLE_URL: &str =
+    "https://github.com/pimalaya/himalaya-tui/blob/master/config.sample.toml";
 
-/// The resolver every probe queries: the one `HIMALAYA_DNS_RESOLVER`
-/// names, else the host's own, else [`DEFAULT_RESOLVER`]. Preferring
-/// the system resolver keeps a split-horizon or corporate network
-/// resolving the way every other program on that host does.
-pub fn discovery_resolver() -> Url {
-    if let Ok(resolver) = env::var("HIMALAYA_DNS_RESOLVER")
-        && let Ok(url) = resolver.parse()
-    {
-        return url;
-    }
-
-    if let Some(url) = system_resolver() {
-        return url;
-    }
-
-    DEFAULT_RESOLVER
-        .parse()
-        .expect("DEFAULT_RESOLVER must be a valid URL")
+/// The backend config produced by the chosen flow, folded into a fresh
+/// [`AccountConfig`] afterwards.
+enum Chosen {
+    #[cfg(all(feature = "imap", feature = "smtp"))]
+    ImapSmtp(Box<ImapConfig>, Option<Box<SmtpConfig>>),
+    #[cfg(feature = "jmap")]
+    Jmap(Box<JmapConfig>),
+    #[cfg(feature = "maildir")]
+    Maildir(MaildirConfig),
+    #[cfg(feature = "m2dir")]
+    M2dir(M2dirConfig),
 }
 
-/// TLS profile for the HTTPS-bound discovery mechanisms; they only
-/// speak HTTP/1.1 to `_well-known` endpoints.
-pub fn discovery_tls() -> Tls {
-    Tls {
-        rustls: Rustls {
-            alpn: vec!["http/1.1".into()],
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
-/// Per-source discovery payload. Each successful probe carries
-/// whatever IMAP/SMTP/JMAP endpoints the source reported.
-#[derive(Default)]
-pub struct DiscoveryResult {
-    pub jmap: Option<WizardJmapConfig>,
-    pub imap: Option<WizardImapConfig>,
-    pub smtp: Option<WizardSmtpConfig>,
-}
-
-impl DiscoveryResult {
-    pub fn is_empty(&self) -> bool {
-        self.imap.is_none() && self.smtp.is_none() && self.jmap.is_none()
-    }
-}
-
-/// Prompts for the value to discover from, then runs the flow on it.
+/// Discovers one account from a single prompt, tests it, and hands back
+/// the name it proposes with the account itself.
 ///
-/// The prompt asks for an email alone, matching the himalaya CLI's:
-/// naming every accepted shape up front read as a question about which
-/// one to pick rather than an invitation to type the obvious answer. A
-/// server URL and a folder path still work, and the empty-input error
-/// is where that is spelled out.
-pub fn run(from: Option<&str>) -> Result<AccountConfig> {
-    let input = prompt::text::<&str>("Email:", None)?;
-    run_with_input(input.trim(), from)
-}
-
-/// Same flow as [`run`], but consumes a pre-supplied input (typically
-/// from the CLI positional argument) instead of prompting for one.
+/// What happens to that account, written to a file, appended to one or
+/// opened for this session alone, belongs to [`super::configure`],
+/// which is also where the welcome lives: this is the discovery half.
 ///
-/// `from` is the CLI-provided `--from` address (when any); it seeds
-/// the SASL/JMAP login prompts as a fallback default whenever the
-/// input itself does not already carry a local part.
-pub fn run_with_input(input: &str, from: Option<&str>) -> Result<AccountConfig> {
-    match classify(input)? {
-        Input::FileUrl(path) => build_fs_account(path),
-        Input::Url(url) => build_url_account(url, from),
-        Input::Domain(domain) => build_discovery_account(None, &domain, from),
-        Input::Email { local, domain } => build_discovery_account(Some(&local), &domain, from),
-    }
-}
-
-enum Input {
-    Email { local: String, domain: String },
-    Url(Url),
-    FileUrl(PathBuf),
-    Domain(String),
-}
-
-fn classify(input: &str) -> Result<Input> {
+/// `seed` answers the prompt on the caller's behalf, the positional
+/// argument being the TUI's way of naming a throwaway account outright.
+pub fn run(seed: Option<&str>) -> Result<(String, AccountConfig)> {
+    let prompted;
+    let input = match seed {
+        Some(seed) => seed,
+        None => {
+            prompted = prompt::text::<&str>("Email:", None)?;
+            prompted.as_str()
+        }
+    };
+    let input = input.trim();
     if input.is_empty() {
         bail!("Empty input: enter an email address, a server URL, or a folder path");
     }
 
-    if input.contains('@') && !input.contains("://") {
-        let Some((local, domain)) = input.rsplit_once('@') else {
-            bail!("Invalid email address `{input}`")
-        };
-        return Ok(Input::Email {
-            local: local.to_owned(),
-            domain: domain.to_owned(),
-        });
-    }
+    // NOTE: the account name is just the TOML table key, so it is derived
+    // from the input rather than prompted; the user renames it by hand.
+    let account_name = default_account_name(input);
+    let (account, tested) = build_account(&account_name, input)?;
 
-    match Url::parse(input) {
-        Ok(url) if url.scheme().eq_ignore_ascii_case("file") => {
-            let path = url
-                .to_file_path()
-                .map_err(|_| anyhow!("Cannot resolve filesystem path from `{input}`"))?;
-            Ok(Input::FileUrl(path))
+    // Test the account before opening it: a bad credential or endpoint
+    // fails here and stops the process, like any other error, rather
+    // than dropping into an interface that can show nothing. The
+    // IMAP+SMTP flow already tests each protocol as it configures them,
+    // so skip the redundant round-trip in that case.
+    if !tested {
+        let spinner = Spinner::start("Testing account configuration");
+        if let Err(err) = check::test_account(&account) {
+            spinner.failure("Account configuration test failed");
+            return Err(err);
         }
-        Ok(url) => Ok(Input::Url(url)),
-        Err(url::ParseError::RelativeUrlWithoutBase) => Ok(Input::Domain(input.to_owned())),
-        Err(err) => Err(err.into()),
+        spinner.success("Account configuration is valid");
+    }
+
+    Ok((account_name, account))
+}
+
+/// The result of a configure flow: the chosen backend, whether it
+/// already validated its connections (so the caller skips the final
+/// account test), and any `mailbox.alias.*` entries discovered from the
+/// server.
+struct Outcome {
+    chosen: Chosen,
+    tested: bool,
+    aliases: HashMap<String, String>,
+}
+
+impl Outcome {
+    /// A not-yet-tested outcome with no discovered aliases, for the
+    /// flows that defer validation to the final account test (the local
+    /// backends).
+    fn untested(chosen: Chosen) -> Self {
+        Self {
+            chosen,
+            tested: false,
+            aliases: HashMap::new(),
+        }
     }
 }
 
-fn build_fs_account(root: PathBuf) -> Result<AccountConfig> {
-    if !root.is_dir() {
-        bail!(
-            "Filesystem root `{}` does not exist or is not a directory",
-            root.display()
-        );
-    }
-
-    // Presence of a `.m2store` marker promotes the path to m2dir;
-    // otherwise treat it as a maildir root.
-    let mut cfg = empty_account();
-    if root.join(".m2store").is_file() {
-        cfg.m2dir = Some(M2dirConfig { root });
+/// Orients the setup from the input shape, then folds the chosen
+/// backend into a fresh [`AccountConfig`]. The returned flag reports
+/// whether the flow already validated its connections (the IMAP+SMTP
+/// and JMAP paths do), so the caller can skip the final account test.
+///
+/// The account is left non-default here. Whether it claims the default
+/// depends on what the configuration already holds, which discovery
+/// does not read, so [`super::configure`] decides it.
+fn build_account(account_name: &str, input: &str) -> Result<(AccountConfig, bool)> {
+    let Outcome {
+        chosen,
+        tested,
+        aliases,
+    } = if is_path(input) {
+        Outcome::untested(configure_local(input)?)
     } else {
-        cfg.maildir = Some(MaildirConfig { root });
-    }
-    Ok(cfg)
-}
-
-fn empty_account() -> AccountConfig {
-    AccountConfig {
-        default: true,
-        from: None,
-        from_name: None,
-        signature: None,
-        signature_delim: None,
-        downloads_dir: None,
-        imap: None,
-        jmap: None,
-        maildir: None,
-        m2dir: None,
-        smtp: None,
-    }
-}
-
-fn build_url_account(url: Url, from: Option<&str>) -> Result<AccountConfig> {
-    let scheme = url.scheme().to_ascii_lowercase();
-    let Some(host) = url.host_str().map(str::to_owned) else {
-        bail!("URL `{url}` is missing a host")
+        configure_discovery(account_name, input)?
     };
 
-    match scheme.as_str() {
-        // `imap[s]://` and `smtp[s]://` are just "I want IMAP+SMTP"
-        // hints: the URL's host is the discovery target, and both
-        // backends come from whatever pacc/autoconfig/srv returns.
-        "imap" | "imaps" | "smtp" | "smtps" => {
-            let domain = extract_discovery_domain(&host);
-            build_discovery_account(None, domain, from)
-        }
-        "jmap" | "jmaps" | "https" => {
-            let auth = prompt_jmap_auth(from)?;
-            let jmap = JmapConfig {
-                server: url.to_string(),
-                tls: Default::default(),
-                alpn: None,
-                auth,
-                identity_id: None,
-                drafts_mailbox_id: None,
-            };
-            Ok(account_jmap_only(jmap))
-        }
-        other => bail!("Unsupported URL scheme `{other}`"),
-    }
-}
-
-/// Strips a leading `imap.` / `smtp.` / `mail.` style label from a
-/// host so the discovery probes can target the apex domain. Anything
-/// with two or fewer labels is left alone (already the apex, or short
-/// enough that stripping would break it).
-fn extract_discovery_domain(host: &str) -> &str {
-    if host.matches('.').count() >= 2 {
-        host.split_once('.').map(|(_, tail)| tail).unwrap_or(host)
-    } else {
-        host
-    }
-}
-
-fn build_discovery_account(
-    local_part: Option<&str>,
-    domain: &str,
-    from: Option<&str>,
-) -> Result<AccountConfig> {
-    let result = discover(local_part, domain);
-    if result.is_empty() {
-        bail!(
-            "No configuration could be discovered for `{domain}`. \
-             Try giving an `imap[s]://`, `smtp[s]://` or `https://` URL instead."
-        );
-    }
-
-    let DiscoveryResult { jmap, imap, smtp } = result;
-
-    // A local part embedded in the wizard input wins over `--from`:
-    // the user is logging into the address they typed, not the one
-    // they happen to send mail as.
-    let login_default = local_part
-        .map(|l| format!("{l}@{domain}"))
-        .or_else(|| from.map(String::from));
-
-    if let Some(jmap_endpoint) = jmap {
-        let auth = prompt_jmap_auth(login_default.as_deref())?;
-        let jmap = JmapConfig {
-            server: jmap_endpoint.server,
-            tls: Default::default(),
-            alpn: None,
-            auth,
-            identity_id: None,
-            drafts_mailbox_id: None,
-        };
-        return Ok(account_jmap_only(jmap));
-    }
-
-    let Some(imap_endpoint) = imap else {
-        bail!("Discovery returned no IMAP endpoint")
+    let mut account = AccountConfig {
+        default: false,
+        ..Default::default()
     };
 
-    let sasl = prompt_sasl(login_default.as_deref())?;
-    let imap_cfg = build_imap_config(
-        &imap_endpoint.host,
-        imap_endpoint.port,
-        matches!(imap_endpoint.encryption, ImapEncryption::StartTls),
-        sasl.clone(),
-    );
+    match chosen {
+        #[cfg(all(feature = "imap", feature = "smtp"))]
+        Chosen::ImapSmtp(imap, smtp) => {
+            account.imap = Some(*imap);
+            account.smtp = smtp.map(|smtp| *smtp);
+        }
+        #[cfg(feature = "jmap")]
+        Chosen::Jmap(jmap) => account.jmap = Some(*jmap),
+        #[cfg(feature = "maildir")]
+        Chosen::Maildir(maildir) => account.maildir = Some(maildir),
+        #[cfg(feature = "m2dir")]
+        Chosen::M2dir(m2dir) => account.m2dir = Some(m2dir),
+    }
 
-    let smtp_cfg = smtp.map(|smtp_endpoint| {
-        build_smtp_config(
-            &smtp_endpoint.host,
-            smtp_endpoint.port,
-            matches!(smtp_endpoint.encryption, SmtpEncryption::StartTls),
-            sasl,
-        )
+    // NOTE: the discovered special-use aliases are the himalaya CLI's
+    // way of addressing a mailbox without hand-editing ids; the TUI
+    // resolves names live and reads none of them, but one file backs
+    // both binaries.
+    account.mailbox.aliases = aliases;
+
+    // NOTE: an address is the one thing the prompt may already have
+    // been answered with, so the composer gets its `From` without the
+    // user writing it down twice. The name it carries is not
+    // discoverable, and is left to be added by hand.
+    account.from = prompted_email(input).map(ToString::to_string);
+
+    Ok((account, tested))
+}
+
+/// Runs the discovery flow for an email, a bare domain, or a
+/// `scheme://` server URL: search the services reachable from it, keep
+/// only those supported by this build (and matching the URL scheme when
+/// one was given), let the user pick one, then configure its backend
+/// (the authentication method is picked in a second, service-specific
+/// prompt). When nothing is discovered the wizard stops rather than
+/// prompting for a hand-entered config (see [`stop_undiscovered`]).
+fn configure_discovery(account_name: &str, input: &str) -> Result<Outcome> {
+    // A `scheme://host` URL discovers from its host, and its scheme
+    // narrows the results; an email or bare domain discovers from the
+    // domain with no scheme filter.
+    let (email, scheme) = if input.contains("://") {
+        let url = Url::parse(input).with_context(|| format!("Invalid server URL `{input}`"))?;
+        let host = url.host_str().unwrap_or_default().to_string();
+        (format!("@{host}"), Some(url.scheme().to_string()))
+    } else if input.contains('@') {
+        (input.to_string(), None)
+    } else {
+        (format!("@{input}"), None)
+    };
+
+    let spinner = Spinner::start("Searching for server settings");
+    let mut found = search::search(&email)?;
+    retain_supported(&mut found);
+    if let Some(scheme) = &scheme {
+        retain_scheme(&mut found, scheme)?;
+    }
+
+    if found.is_empty() {
+        spinner.failure("No configuration found");
+        return stop_undiscovered(input);
+    }
+    spinner.success(format!("Found {} configuration(s)", found.len()));
+
+    let default = found.first().cloned();
+    let choice = prompt::item("Choose a configuration:", found, default)?;
+
+    dispatch(account_name, &email, choice)
+}
+
+/// Keeps only the discovered entries a `scheme://` URL asked for: `imap`
+/// and `imaps` keep IMAP + SMTP (with `imaps` requiring an implicit-TLS
+/// IMAP endpoint), and the HTTP-family schemes keep JMAP. A proprietary
+/// entry (Gmail, Graph) is dropped, since the user named an open
+/// protocol. An unknown scheme is rejected outright.
+fn retain_scheme(found: &mut Vec<Discovered>, scheme: &str) -> Result<()> {
+    match scheme {
+        #[cfg(all(feature = "imap", feature = "smtp"))]
+        "imap" | "imaps" => {
+            let tls_only = scheme == "imaps";
+            found.retain(|entry| match &entry.kind {
+                DiscoveredKind::ImapSmtp { imap, .. } => {
+                    !tls_only || imap.security == DiscoverySecurity::Tls
+                }
+                _ => false,
+            });
+        }
+        "jmap" | "jmaps" | "http" | "https" => {
+            found.retain(|entry| matches!(entry.kind, DiscoveredKind::Jmap(_)));
+        }
+        other => bail!("Unsupported server scheme `{other}`"),
+    }
+
+    Ok(())
+}
+
+/// Stops the wizard when discovery found nothing to configure for
+/// `input`: it prints where to go next (a hand-written config, seeded
+/// from the documented sample) and errors out, rather than dropping into
+/// a hand-entry flow. The wizard only ever configures what it can
+/// discover automatically.
+fn stop_undiscovered(input: &str) -> Result<Outcome> {
+    bail!(
+        "Could not automatically discover a configuration for `{input}`.\n\n\
+         Write your account configuration by hand instead, starting from the \
+         documented sample:\n  {CONFIG_SAMPLE_URL}"
+    )
+}
+
+/// Configures the backend behind a discovered entry. The IMAP+SMTP and
+/// JMAP flows test their connections inline (marking the outcome tested)
+/// and discover their `mailbox.alias.*` on the same session.
+#[cfg_attr(
+    all(feature = "imap", feature = "smtp", feature = "jmap"),
+    allow(unreachable_patterns)
+)]
+fn dispatch(account_name: &str, email: &str, choice: Discovered) -> Result<Outcome> {
+    match &choice.kind {
+        #[cfg(all(feature = "imap", feature = "smtp"))]
+        DiscoveredKind::ImapSmtp { .. } => {
+            let (imap, smtp, aliases) =
+                imap_smtp::configure_discovered(account_name, email, &choice)?;
+            Ok(Outcome {
+                chosen: Chosen::ImapSmtp(Box::new(imap), smtp.map(Box::new)),
+                tested: true,
+                aliases,
+            })
+        }
+        #[cfg(feature = "jmap")]
+        DiscoveredKind::Jmap(_) => {
+            let (jmap, aliases) = jmap::configure_discovered(account_name, email, &choice)?;
+            Ok(Outcome {
+                chosen: Chosen::Jmap(Box::new(jmap)),
+                tested: true,
+                aliases,
+            })
+        }
+        kind => bail!("Configuration `{kind:?}` is not supported by this build"),
+    }
+}
+
+/// Configures a local backend from a typed folder path.
+#[cfg(any(feature = "maildir", feature = "m2dir"))]
+fn configure_local(input: &str) -> Result<Chosen> {
+    let raw = input.strip_prefix("file://").unwrap_or(input);
+    let root = shellexpand::tilde(raw).into_owned();
+    if !Path::new(&root).is_dir() {
+        bail!("No such folder `{raw}`");
+    }
+
+    Ok(match local::configure(root.into())? {
+        #[cfg(feature = "maildir")]
+        local::Local::Maildir(config) => Chosen::Maildir(config),
+        #[cfg(feature = "m2dir")]
+        local::Local::M2dir(config) => Chosen::M2dir(config),
+    })
+}
+
+#[cfg(not(any(feature = "maildir", feature = "m2dir")))]
+fn configure_local(input: &str) -> Result<Chosen> {
+    bail!("`{input}` looks like a folder path, but no local backend is compiled in")
+}
+
+/// Drops the discovered entries whose backend is not compiled in.
+fn retain_supported(found: &mut Vec<Discovered>) {
+    found.retain(|entry| match entry.kind {
+        DiscoveredKind::ImapSmtp { .. } => cfg!(all(feature = "imap", feature = "smtp")),
+        DiscoveredKind::Jmap(_) => cfg!(feature = "jmap"),
+        // NOTE: the proprietary APIs are the himalaya CLI's; this binary
+        // reaches a Google or Microsoft account over IMAP + SMTP.
+        DiscoveredKind::Gmail | DiscoveredKind::Msgraph => false,
     });
-
-    Ok(AccountConfig {
-        default: true,
-        from: None,
-        from_name: None,
-        signature: None,
-        signature_delim: None,
-        downloads_dir: None,
-        imap: Some(imap_cfg),
-        jmap: None,
-        maildir: None,
-        m2dir: None,
-        smtp: smtp_cfg,
-    })
 }
 
-/// Probes PACC → Autoconfig ISP (when `local_part` is `Some`) →
-/// Autoconfig ISP-fallback → Thunderbird ISPDB → RFC 6186 SRV in that
-/// order, returning the first non-empty result.
-fn discover(local_part: Option<&str>, domain: &str) -> DiscoveryResult {
-    if let Some(result) = pacc::run(domain)
-        .map(|c| pacc::defaults(&c))
-        .filter(|r| !r.is_empty())
+/// Proposes a default account name from the input shape: the first
+/// label of the domain (of an email, host, or bare domain), or the
+/// folder name of a local path.
+fn default_account_name(input: &str) -> String {
+    if is_path(input) {
+        let raw = input.strip_prefix("file://").unwrap_or(input);
+        return Path::new(raw)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("personal")
+            .to_string();
+    }
+
+    if let Ok(url) = Url::parse(input)
+        && let Some(host) = url.host_str()
     {
-        return result;
+        return first_label(host);
     }
 
-    if let Some(local) = local_part
-        && let Some(result) = autoconfig::run_isp(local, domain)
-            .map(|c| autoconfig::defaults(&c))
-            .filter(|r| !r.is_empty())
-    {
-        return result;
-    }
-
-    if let Some(result) = autoconfig::run_isp_fallback(domain)
-        .map(|c| autoconfig::defaults(&c))
-        .filter(|r| !r.is_empty())
-    {
-        return result;
-    }
-
-    if let Some(result) = autoconfig::run_ispdb(domain)
-        .map(|c| autoconfig::defaults(&c))
-        .filter(|r| !r.is_empty())
-    {
-        return result;
-    }
-
-    if let Some(result) = srv::run(domain)
-        .map(|r| srv::defaults(&r))
-        .filter(|r| !r.is_empty())
-    {
-        return result;
-    }
-
-    DiscoveryResult::default()
-}
-
-// The SASL mechanisms split by credential kind: a password family
-// (login + password), a token family (login + API token) and ANONYMOUS
-// (no credentials). Labels, order and prompts are kept identical to the
-// himalaya CLI wizard (`wizard::imap_smtp::prompt_sasl`) so both
-// front-ends select auth the same way. The TUI's series discovery
-// advertises no auth capabilities, so every mechanism is always offered,
-// matching the CLI's "none advertised" branch.
-const PLAIN: &str = "PLAIN (login + password)";
-const LOGIN: &str = "LOGIN (login + password)";
-const SCRAM_SHA_256: &str = "SCRAM-SHA-256 (login + password)";
-const ANONYMOUS: &str = "ANONYMOUS (no credentials)";
-const OAUTHBEARER: &str = "OAUTHBEARER (login + API token)";
-const XOAUTH2: &str = "XOAUTH2 (login + API token)";
-
-const SASL_MECHANISMS: [&str; 6] = [PLAIN, LOGIN, SCRAM_SHA_256, ANONYMOUS, OAUTHBEARER, XOAUTH2];
-
-fn prompt_sasl(email: Option<&str>) -> Result<SaslConfig> {
-    let mechanism = prompt::item("SASL mechanism:", SASL_MECHANISMS, None)?;
-
-    // ANONYMOUS carries no login; every other mechanism needs one.
-    if mechanism == ANONYMOUS {
-        let message = prompt::some_text::<&str>("ANONYMOUS message (optional):", None)?;
-        return Ok(SaslConfig::Anonymous(SaslAnonymousConfig { message }));
-    }
-
-    let login = prompt::text("Login:", email)?;
-
-    Ok(match mechanism {
-        PLAIN => SaslConfig::Plain(SaslPlainConfig {
-            authzid: None,
-            authcid: login,
-            passwd: prompt_raw_secret("Password")?,
-        }),
-        LOGIN => SaslConfig::Login(SaslLoginConfig {
-            username: login,
-            password: prompt_raw_secret("Password")?,
-        }),
-        SCRAM_SHA_256 => SaslConfig::ScramSha256(SaslScramSha256Config {
-            username: login,
-            password: prompt_raw_secret("Password")?,
-        }),
-        OAUTHBEARER => SaslConfig::Oauthbearer(SaslOauthbearerConfig {
-            username: login,
-            token: prompt_raw_secret("API token")?,
-        }),
-        XOAUTH2 => SaslConfig::Xoauth2(SaslXoauth2Config {
-            username: login,
-            token: prompt_raw_secret("API token")?,
-        }),
-        _ => unreachable!(),
-    })
-}
-
-// The JMAP HTTP authentication schemes, kept identical to the himalaya
-// CLI wizard (`wizard::jmap::prompt_auth`); both schemes are always
-// offered since the TUI discovery advertises no capabilities.
-const JMAP_BASIC: &str = "Basic (login + password)";
-const JMAP_BEARER: &str = "Bearer (API token)";
-const JMAP_AUTHS: [&str; 2] = [JMAP_BASIC, JMAP_BEARER];
-
-fn prompt_jmap_auth(email: Option<&str>) -> Result<JmapAuthConfig> {
-    let scheme = prompt::item("JMAP authentication:", JMAP_AUTHS, None)?;
-
-    Ok(match scheme {
-        JMAP_BASIC => JmapAuthConfig::Basic {
-            username: prompt::text("Login:", email)?,
-            password: prompt_raw_secret("JMAP password")?,
-        },
-        JMAP_BEARER => JmapAuthConfig::Bearer {
-            token: prompt_raw_secret("JMAP API token")?,
-        },
-        _ => unreachable!(),
-    })
-}
-
-fn prompt_raw_secret(label: &str) -> Result<Secret> {
-    let raw = prompt::secret(format!("{label}:"))?;
-    Ok(Secret::Raw(SecretString::from(raw)))
-}
-
-fn build_imap_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) -> ImapConfig {
-    let scheme = if starttls { "imap" } else { "imaps" };
-    ImapConfig {
-        server: format!("{scheme}://{host}:{port}"),
-        tls: Default::default(),
-        starttls,
-        alpn: None,
-        sasl: Some(sasl),
-        sasl_ir: None,
-        id: Default::default(),
-        sort: Default::default(),
+    match input.rsplit_once('@') {
+        Some((_, domain)) => first_label(domain),
+        None => first_label(input),
     }
 }
 
-fn build_smtp_config(host: &str, port: u16, starttls: bool, sasl: SaslConfig) -> SmtpConfig {
-    let scheme = if starttls { "smtp" } else { "smtps" };
-    SmtpConfig {
-        server: format!("{scheme}://{host}:{port}"),
-        tls: Default::default(),
-        starttls,
-        alpn: None,
-        sasl: Some(sasl),
+/// The input read back as an email address, or [`None`] when it names
+/// a folder, a server URL or a bare domain instead.
+///
+/// A server URL may carry a userinfo part and so hold an `@` of its
+/// own, which is a credential and not an address, hence the check for
+/// a scheme before the one for a local part.
+fn prompted_email(input: &str) -> Option<&str> {
+    if is_path(input) || input.contains("://") {
+        return None;
     }
+
+    let (local, domain) = input.rsplit_once('@')?;
+
+    if local.is_empty() || domain.is_empty() {
+        return None;
+    }
+
+    Some(input)
 }
 
-fn account_jmap_only(jmap: JmapConfig) -> AccountConfig {
-    AccountConfig {
-        default: true,
-        from: None,
-        from_name: None,
-        signature: None,
-        signature_delim: None,
-        downloads_dir: None,
-        imap: None,
-        jmap: Some(jmap),
-        maildir: None,
-        m2dir: None,
-        smtp: None,
+/// The first dot-separated label of a host or domain.
+fn first_label(host: &str) -> String {
+    host.split('.').next().unwrap_or(host).to_string()
+}
+
+/// Whether the input names a filesystem path (absolute, home-relative,
+/// explicitly relative, or a `file://` URL) rather than a network
+/// endpoint.
+fn is_path(input: &str) -> bool {
+    input.starts_with("file://")
+        || input.starts_with('/')
+        || input.starts_with('~')
+        || input.starts_with("./")
+        || input.starts_with("../")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_name_defaults_to_the_first_domain_label() {
+        // Email: the domain's first label, never the local part.
+        assert_eq!(default_account_name("clement.douin@posteo.net"), "posteo");
+        assert_eq!(default_account_name("alice@mail.example.co.uk"), "mail");
+        // Bare domain (as discovery synthesizes it) and plain domain.
+        assert_eq!(default_account_name("@posteo.net"), "posteo");
+        assert_eq!(default_account_name("posteo.net"), "posteo");
+    }
+
+    #[test]
+    fn account_name_defaults_to_the_last_path_component() {
+        assert_eq!(
+            default_account_name("/home/alice/mail/personal"),
+            "personal"
+        );
+        assert_eq!(default_account_name("~/mail/work"), "work");
+        assert_eq!(default_account_name("file:///var/mail/archive"), "archive");
+    }
+
+    #[test]
+    fn only_an_address_is_kept_as_the_account_from() {
+        assert_eq!(
+            prompted_email("alice@example.org"),
+            Some("alice@example.org")
+        );
+
+        // A bare domain, as discovery also synthesizes it, names no
+        // mailbox; neither does a folder or a server URL, whose `@`
+        // would be a credential.
+        assert_eq!(prompted_email("@example.org"), None);
+        assert_eq!(prompted_email("example.org"), None);
+        assert_eq!(prompted_email("~/mail/work"), None);
+        assert_eq!(prompted_email("imaps://alice@imap.example.org"), None);
+    }
+
+    #[test]
+    fn discovered_aliases_render_as_a_mailbox_alias_table() {
+        let mut account = AccountConfig {
+            from: Some("me@posteo.net".to_string()),
+            ..Default::default()
+        };
+        account
+            .mailbox
+            .aliases
+            .insert("inbox".to_string(), "INBOX".to_string());
+
+        let rendered = account.render("posteo").expect("render the account");
+
+        assert!(rendered.contains("[accounts.posteo]"));
+        assert!(rendered.contains("mailbox.alias.inbox = \"INBOX\""));
+
+        // The account is written under the CLI's spelling, and the
+        // identity says what the account is, so it reads before the
+        // mailboxes it names.
+        let email = rendered.find("email = ").expect("the address is rendered");
+        let alias = rendered
+            .find("mailbox.alias")
+            .expect("the alias is rendered");
+        assert!(email < alias);
     }
 }

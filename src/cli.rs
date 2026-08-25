@@ -2,7 +2,13 @@
 //! turns parsed flags + on-disk config (or the wizard) into a ready-to-run
 //! [`Model`], applying CLI overrides last.
 
-use std::{env::temp_dir, fs::File, path::PathBuf, time::Instant};
+use std::{
+    env::temp_dir,
+    fs::File,
+    io::{IsTerminal, stdin},
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -13,16 +19,15 @@ use pimalaya_cli::{
         commands::{CompletionCommand, ManualCommand},
         parsers::path_parser,
     },
-    long_version,
+    footer, long_version,
     printer::Printer,
+    prompt,
     spinner::Spinner,
 };
 use pimalaya_config::toml::TomlConfig;
 use simplelog::WriteLogger;
 use tui_input::Input;
 
-#[cfg(all(feature = "imap", feature = "smtp", feature = "jmap"))]
-use crate::wizard;
 use crate::{
     config::{AccountConfig, Config},
     shared::client::EmailClient,
@@ -31,26 +36,33 @@ use crate::{
         theme::Theme,
         update,
     },
+    wizard,
 };
+
+/// RFC 3676 §4.3 signature separator, written before the signature
+/// when neither the account nor the global config names one. Matches
+/// the himalaya CLI's own default.
+const DEFAULT_SIGNATURE_DELIM: &str = "-- \n";
 
 #[derive(Parser, Debug)]
 #[command(name = env!("CARGO_PKG_NAME"))]
 #[command(author, version, about)]
 #[command(long_version = long_version!())]
+#[command(after_help = footer!())]
 #[command(propagate_version = true, infer_subcommands = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Email address to discover a throwaway account from.
+    /// Email address to configure an account from.
     ///
-    /// Passing one skips the account lookup entirely and opens the
-    /// account discovered from this value, so it is the quickest way to
-    /// try a server without touching your configuration. A server URL
-    /// and a local folder path work here too, the address being what
-    /// this is reached for. The rest of the file (theme, signature,
-    /// keybindings) still applies; `--no-config` drops that too.
-    /// Omitting it and `--account` alike opens the default account.
+    /// Passing one skips the account lookup entirely and runs the
+    /// wizard on this value, which answers its first prompt: it is the
+    /// quickest way to try a server. A server URL and a local folder
+    /// path work here too, the address being what this is reached for.
+    /// The rest of the file (theme, signature, keybindings) still
+    /// applies; `--no-config` drops that too. Omitting it and
+    /// `--account` alike opens the default account.
     #[arg(value_name = "EMAIL", conflicts_with = "account")]
     pub seed: Option<String>,
 
@@ -82,24 +94,22 @@ pub struct Cli {
     ///
     /// The given paths are shell-expanded then canonicalized (if
     /// applicable). If the first path does not point to a valid file,
-    /// the run warns and falls back to the wizard, which builds an
-    /// account in memory for this session only. Other paths are
-    /// merged with the first one, which allows you to separate your
-    /// public config from your private(s) one(s). Multiple paths can
-    /// also be provided by delimiting them with `:` (like `$PATH` in
-    /// a POSIX shell).
+    /// the run falls back to the wizard, which offers to write one
+    /// there. Other paths are merged with the first one, which allows
+    /// you to separate your public config from your private one(s).
+    /// Multiple paths can also be provided by delimiting them with `:`
+    /// (like `$PATH` in a POSIX shell).
     #[arg(long = "config", short, global = true, env = "HIMALAYA_CONFIG")]
     #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
     pub config_paths: Vec<PathBuf>,
     /// Skip the configuration file entirely and run the wizard.
     ///
-    /// Useful when a config already exists on disk but you want a
-    /// throwaway, in-memory account for this run (e.g. to hand the TUI
-    /// off to someone else without exposing your stored credentials).
-    /// Unlike the positional argument, this drops the whole file, theme
-    /// and signature included. The wizard never writes to disk;
-    /// `--config` and `HIMALAYA_CONFIG` are ignored when this flag is
-    /// set, and no warning is raised since the wizard was asked for.
+    /// Useful when a config already exists on disk but you want another
+    /// account for this run. Unlike the positional argument, this drops
+    /// the whole file, theme and signature included, and no welcome is
+    /// printed since the wizard was asked for. The file is not read,
+    /// but `--config` and `HIMALAYA_CONFIG` still name the one the
+    /// wizard offers to file its account in.
     #[arg(long = "no-config")]
     pub no_config: bool,
     #[command(flatten)]
@@ -122,10 +132,13 @@ impl Cli {
         )?;
 
         // NOTE: a seed and `--no-config` ask for the wizard outright, so
-        // the account lookup is skipped and nothing is warned about. The
-        // wizard also runs when that lookup finds nothing, but there it
-        // is a mistake the user can fix, and `wizard_reason` names which.
+        // the account lookup is skipped and the wizard goes straight to
+        // its prompts. It also runs when that lookup finds nothing, and
+        // there it introduces itself first: `welcome` carries the path
+        // the missing file was looked for at, `wizard_reason` the
+        // mistake the user can fix.
         let asked_for_wizard = self.no_config || self.seed.is_some();
+        let mut welcome = None;
         let mut wizard_reason = None;
 
         // NOTE: a seed keeps the file for its globals (theme, signature,
@@ -150,21 +163,15 @@ impl Cli {
                     );
                 }
 
-                wizard_reason = Some(format!(
-                    "No configuration file at {}, falling back to an in-memory account",
-                    path.display()
-                ));
+                welcome = Some(path);
             }
 
             loaded
         };
 
-        let mut account_name = self
-            .seed
-            .clone()
-            .unwrap_or_else(|| String::from("unspecified"));
         let mut display_name = None;
         let mut signature = String::new();
+        let mut signature_delim = None;
         let mut keybinds_config = None;
         let mut theme = Theme::default();
 
@@ -172,44 +179,44 @@ impl Cli {
         if let Some(mut config) = loaded {
             display_name = config.display_name.take();
             signature = config.signature.take().unwrap_or_default();
+            signature_delim = config.signature_delim.take();
             keybinds_config = config.keybinds.take();
             theme = Theme::resolve(&config.theme);
 
             if !asked_for_wizard {
                 match config.take_account(self.account.as_deref())? {
-                    Some((name, cfg)) => {
-                        account_name = name;
-                        account = Some(cfg);
-                    }
+                    Some(named) => account = Some(named),
                     None => {
                         wizard_reason = Some(String::from(
-                            "Configuration file carries no default account, falling back to an in-memory account",
+                            "Configuration file carries no default account, falling back to the wizard",
                         ));
                     }
                 }
             }
         }
 
-        let mut account_config = match account {
-            Some(account) => account,
-            // No stored account to run on, so the wizard builds one in
-            // memory for this session. It is not the CLI's wizard: it
-            // writes nothing and proposes no config entry. The seed
-            // feeds it when one was given, otherwise it prompts.
+        let (account_name, mut account_config) = match account {
+            Some(named) => named,
+            // No stored account to run on, so the wizard builds one. The
+            // seed answers its first prompt when one was given.
             None => {
                 match wizard_reason {
                     Some(reason) => spinner.failure(reason),
                     None => spinner.clear(),
                 }
-                let account = run_wizard(self.seed.as_deref(), self.from.as_deref())?;
+                let named =
+                    run_wizard(welcome.as_deref(), self.seed.as_deref(), &self.config_paths)?;
                 spinner = Spinner::start("Loading…");
-                account
+                named
             }
         };
 
         let from = account_config.from.clone();
         let from_name = account_config.from_name.take().or(display_name);
-        let signature = account_config.signature.take().unwrap_or(signature);
+        let signature = signature_block(
+            account_config.signature.take().unwrap_or(signature),
+            account_config.signature_delim.take().or(signature_delim),
+        );
         let keybinds = self.keybinds.or(keybinds_config);
 
         let client = EmailClient::new(account_config)?;
@@ -261,24 +268,55 @@ impl Cli {
     }
 }
 
-/// Runs the interactive setup wizard used when no configuration file is
-/// found. The wizard discovers IMAP/SMTP/JMAP accounts, so it is only
-/// compiled when all three backends are enabled; other builds require a
-/// configuration file.
-#[cfg(all(feature = "imap", feature = "smtp", feature = "jmap"))]
-fn run_wizard(seed: Option<&str>, from: Option<&str>) -> Result<AccountConfig> {
-    match seed {
-        Some(seed) => wizard::discover::run_with_input(seed, from),
-        None => wizard::discover::run(from),
+/// Assembles the signature block the composer appends: the separator,
+/// then the signature itself. Empty when the account declares no
+/// signature, so that nothing is appended at all.
+///
+/// mml writes what it is given verbatim, and the himalaya CLI writes
+/// the same two pieces around its own body, so the separator is
+/// resolved here rather than expected inside the configured value: one
+/// file, one meaning, whichever binary composes.
+fn signature_block(signature: String, delim: Option<String>) -> String {
+    if signature.trim().is_empty() {
+        return String::new();
     }
+
+    let delim = delim.unwrap_or_else(|| DEFAULT_SIGNATURE_DELIM.to_string());
+
+    format!("{delim}{}", signature.trim_end_matches('\n'))
 }
 
-#[cfg(not(all(feature = "imap", feature = "smtp", feature = "jmap")))]
-fn run_wizard(_seed: Option<&str>, _from: Option<&str>) -> Result<AccountConfig> {
-    bail!(
-        "The setup wizard requires the imap, smtp and jmap features; \
-         pass a configuration file with --config instead"
-    )
+/// Runs the interactive setup wizard, returning the account to open
+/// under the name it would be filed as.
+///
+/// `welcome` is set when no configuration file was found at all, the
+/// one case the wizard has to introduce itself in: it frames the
+/// binary, names the path, and offers to generate an account. Declining
+/// leaves the run with nothing to open, so it stops there rather than
+/// opening an interface onto no mailbox. A run that asked for the
+/// wizard, with `--no-config` or with an address, skips both.
+fn run_wizard(
+    welcome: Option<&Path>,
+    seed: Option<&str>,
+    config_paths: &[PathBuf],
+) -> Result<(String, AccountConfig)> {
+    // NOTE: nobody is there to answer a prompt without a terminal, so
+    // the offer is skipped rather than raised and left unanswered; the
+    // wizard itself fails on the same condition, naming it.
+    if let Some(path) = welcome.filter(|_| stdin().is_terminal()) {
+        wizard::configure::print_welcome(path);
+
+        if !prompt::bool("Create a configuration with a default account?", true)? {
+            bail!(
+                "No account to open: write a configuration at {} by hand, \
+                 starting from the documented sample:\n  {}",
+                path.display(),
+                wizard::discover::CONFIG_SAMPLE_URL,
+            );
+        }
+    }
+
+    wizard::configure::run(seed, config_paths)
 }
 
 /// Auxiliary subcommands. When none is given, the binary launches the
@@ -297,5 +335,36 @@ impl Command {
             Self::Completions(cmd) => cmd.execute(printer, Cli::command()),
             Self::Manuals(cmd) => cmd.execute(printer, Cli::command()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_signature_block_carries_its_separator() {
+        assert_eq!(
+            signature_block("Alice".to_string(), None),
+            "-- \nAlice",
+            "an unset delimiter falls back to the RFC separator",
+        );
+
+        assert_eq!(
+            signature_block("Alice\n".to_string(), Some("~~~\n".to_string())),
+            "~~~\nAlice",
+            "the delimiter is written verbatim, its own newline included",
+        );
+    }
+
+    #[test]
+    fn no_signature_means_no_block_at_all() {
+        assert_eq!(signature_block(String::new(), None), "");
+        // A delimiter alone is not a signature: mml would append a
+        // bare `-- ` to every draft.
+        assert_eq!(
+            signature_block("  \n".to_string(), Some("-- \n".to_string())),
+            "",
+        );
     }
 }

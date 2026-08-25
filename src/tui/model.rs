@@ -48,6 +48,9 @@ pub struct Model {
     pub account_name: String,
     pub from: Option<String>,
     pub from_name: Option<String>,
+    /// The assembled signature block, separator included, appended
+    /// verbatim by the mml template builders. Empty when the account
+    /// declares no signature.
     pub signature: String,
     pub status_message: Option<String>,
     pub bottom_panel: BottomPanel,

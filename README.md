@@ -18,18 +18,8 @@
 
 - [Features](#features)
 - [Installation](#installation)
-  - [Pre-built binary](#pre-built-binary)
-  - [Cargo](#cargo)
-  - [Nix](#nix)
-  - [Sources](#sources)
 - [Configuration](#configuration)
-  - [Starting without a configuration](#starting-without-a-configuration)
-  - [Provider recipes](#provider-recipes)
-  - [Theming](#theming)
 - [Usage](#usage)
-  - [Keybindings](#keybindings)
-  - [Composing messages](#composing-messages)
-  - [Re-using sessions](#re-using-sessions)
 - [Interfaces](#interfaces)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
@@ -47,10 +37,12 @@
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
-- **Discovery** support:
+- **Discovery** support, searched in parallel:
+  - Fixed provider rules (Google, Microsoft, Fastmail and friends)
   - PACC <sup>[specs](https://datatracker.ietf.org/doc/html/draft-ietf-mailmaint-pacc)</sup>
   - Autoconfiguration (Thunderbird) <sup>[specs](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)</sup>
   - SRV DNS lookups <sup>[rfc6186](https://datatracker.ietf.org/doc/html/rfc6186)</sup>
+  - JMAP session resolve <sup>[rfc8620](https://datatracker.ietf.org/doc/html/rfc8620)</sup>
 - **SOCKS5**, **HTTP** proxy support via `all_proxy`, `https_proxy` and `no_proxy`
 - **Three-pane layout** built on [ratatui](https://ratatui.rs): mailboxes, envelopes, message body or composer
 - **In-app composer** powered by [edtui](https://crates.io/crates/edtui) with system-editor handoff (`Alt-e`)
@@ -107,7 +99,7 @@ nix run
 
 ## Configuration
 
-Himalaya TUI reads a configuration, it never writes one. Accounts are authored by the [himalaya](https://github.com/pimalaya/himalaya) CLI, whose wizard proposes an `[accounts.<name>]` table for your file, or by hand against [config.sample.toml](./config.sample.toml). There is no `configure` command here.
+Accounts are authored by the wizard, by the [himalaya](https://github.com/pimalaya/himalaya) CLI's identical one, or by hand against [config.sample.toml](./config.sample.toml). There is no `configure` command here: the wizard runs when a session has no account to open, and offers to file what it discovered on the way out.
 
 A configuration is loaded from the first valid path among:
 
@@ -126,18 +118,19 @@ Pick the account to open with `-a <NAME>`, or let the one flagged `default = tru
 
 ### Starting without a configuration
 
-A run that resolves no account still has to open something, so it falls back to a wizard that builds one **in memory, for that session only**. Nothing reaches your file, and nothing is proposed for it: to keep an account, author it with the CLI or by hand.
+A run that resolves no account falls back to the wizard, which is the himalaya CLI's own, prompt for prompt: one prompt for an email address, a parallel search of every service reachable from it, a pick list of what answered, then the authentication method that service advertised, with its credentials tested before they are accepted. On the way out it offers to write the `[accounts.<name>]` block it built to your configuration file, or to append it to the one already there.
 
-You can ask for that fallback outright, in two ways. The positional argument seeds it, so `himalaya-tui you@fastmail.com` skips the account lookup and opens a throwaway account discovered from that address, keeping the rest of your file (theme, signature, keybindings). `--no-config` drops the file whole, theme included, and prompts for the address instead. Both are silent, having been asked for, and neither can be combined with `-a`.
+What differs from the CLI is what declining that offer does. The CLI prints the block on stdout, a configuration being all it has to give; here nothing is printed, and the account is opened either way, for that session alone when nothing was written.
 
-The fallback also happens by accident, and there it warns on stderr naming what was missing, since it usually means a mistyped path or a forgotten `default = true`:
+You can ask for the wizard outright, in two ways. The positional argument answers its first prompt, so `himalaya-tui you@fastmail.com` skips the account lookup and configures that address, keeping the rest of your file (theme, signature, keybindings). `--no-config` drops the file whole, theme included, and prompts for the address instead. Both skip the welcome, having been asked for, and neither can be combined with `-a`.
+
+It also happens by accident. No configuration file at all is met with a welcome naming the path it was looked for at and an offer to generate an account; a file carrying no default account warns on stderr and goes straight to the prompts, since it usually means a forgotten `default = true`:
 
 ```
-✗ No configuration file at /home/you/.config/himalaya/config.toml, falling back to an in-memory account
-✗ Configuration file carries no default account, falling back to an in-memory account
+✗ Configuration file carries no default account, falling back to the wizard
 ```
 
-Either way the wizard asks for an email address unless the positional argument already supplied one, probes the discovery mechanisms in series until one answers, then asks for the SASL or HTTP credentials that mechanism needs. A server URL (`imaps://mail.example.com`) and a local folder path (`file:///home/you/Mail`) are accepted wherever the address is, they are just not what the prompt asks for. DNS goes through the host's own resolver, falling back to Cloudflare's `1.1.1.1` over TCP when it finds none; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
+A server URL (`imaps://mail.example.com`) and a local folder path (`~/Mail`) are accepted wherever the address is, they are just not what the prompt asks for: a URL searches from its host and narrows the results to its scheme, a folder configures the Maildir or m2dir it holds. DNS goes through the host's own resolver, falling back to Cloudflare's `1.1.1.1` over TCP when it finds none; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
 
 ### Provider recipes
 

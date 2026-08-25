@@ -39,6 +39,13 @@ use crate::tui::{
     theme::{self, Theme},
 };
 
+/// `skip_serializing_if` predicate skipping a field equal to its type's
+/// default, so a wizard-generated account omits defaulted scalars (the
+/// only serializer is the wizard, see [`crate::wizard`]).
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+
 /// `deny_unknown_fields` is intentionally omitted so the same TOML
 /// file can be shared with the `himalaya` CLI: top-level CLI-only
 /// sections (`table`, `envelope`, `mailbox`, `message`, `attachment`,
@@ -48,7 +55,11 @@ use crate::tui::{
 pub struct Config {
     #[serde(alias = "from-name")]
     pub display_name: Option<String>,
+    /// Signature appended to a composed draft when an account declares
+    /// none of its own. See [`AccountConfig::signature`].
     pub signature: Option<String>,
+    /// Separator written before the signature when an account declares
+    /// none of its own. See [`AccountConfig::signature_delim`].
     pub signature_delim: Option<String>,
     pub downloads_dir: Option<PathBuf>,
     /// Composer keybinding flavor (Vim or Emacs). The CLI `--keybinds`
@@ -76,7 +87,7 @@ impl TomlConfig for Config {
     /// error" leaves the user guessing: a name that does not exist is
     /// usually a typo, so the error lists the ones the file does hold.
     /// The default-account arm is unchanged, [`crate::cli`] turning its
-    /// [`None`] into the in-memory fallback.
+    /// [`None`] into the wizard.
     fn take_account(&mut self, name: Option<&str>) -> Result<Option<(String, Self::Account)>> {
         let Some(name) = name.filter(|name| !name.is_empty() && *name != "default") else {
             return Ok(self.take_default_account());
@@ -237,21 +248,162 @@ impl From<ModifierConfig> for Modifier {
 /// `deny_unknown_fields` is omitted so per-account CLI-only sections
 /// (`table`, `envelope`, `mailbox`, `attachment`) coexist in the same
 /// `[accounts.<name>]` block.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub default: bool,
     pub imap: Option<ImapConfig>,
     pub smtp: Option<SmtpConfig>,
     pub jmap: Option<JmapConfig>,
     pub maildir: Option<MaildirConfig>,
     pub m2dir: Option<M2dirConfig>,
+    /// Address this account sends as. Aliased to `email`, the
+    /// spelling the himalaya CLI writes, the two binaries sharing one
+    /// configuration file.
+    ///
+    /// Written back under the CLI spelling: the wizard here saves into
+    /// the file the CLI authors, and one key spelled two ways depending
+    /// on which binary wrote the block helps nobody.
+    #[serde(alias = "email", rename(serialize = "email"))]
     pub from: Option<String>,
+    /// Name that address carries. Aliased to `display-name`, the
+    /// spelling the CLI writes; falls back to the global
+    /// [`Config::display_name`]. Written back under the CLI spelling,
+    /// as [`AccountConfig::from`] is.
+    #[serde(alias = "display-name", rename(serialize = "display-name"))]
     pub from_name: Option<String>,
+    /// Signature appended to a composed draft, after the body. Falls
+    /// back to the global [`Config::signature`].
+    ///
+    /// The value is the signature alone: the separator before it is
+    /// [`AccountConfig::signature_delim`]'s business, so a signature
+    /// written for one binary reads the same in the other.
     pub signature: Option<String>,
+    /// Separator written before the signature, defaulting to the
+    /// RFC 3676 §4.3 `"-- \n"`. Falls back to the global
+    /// [`Config::signature_delim`].
+    ///
+    /// Written verbatim, so a value meant to stand on its own line
+    /// carries its own trailing newline.
     pub signature_delim: Option<String>,
     pub downloads_dir: Option<PathBuf>,
+    /// Mailbox aliases mapping a friendly name to a backend-native id.
+    ///
+    /// Written by the wizard and read by the himalaya CLI, which needs
+    /// them to address a mailbox without hand-editing ids. Inert here:
+    /// the TUI resolves a mailbox name against the live listing before
+    /// every dispatch, so it never has an id to alias.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub mailbox: MailboxConfig,
+}
+
+/// Per-account `mailbox.*` options.
+///
+/// `deny_unknown_fields` is omitted so the CLI-only `mailbox.list.*`
+/// rendering options coexist under the same key.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MailboxConfig {
+    /// Aliases keyed by friendly name, `inbox = "INBOX"` and friends.
+    #[serde(default, rename = "alias", alias = "aliases")]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub aliases: HashMap<String, String>,
+}
+
+/// The order the rendered account groups its keys in, most defining
+/// first: what the account is, who it speaks for, then the backend it
+/// reads from, the transport it sends over, and the mailboxes it
+/// names. Matches the himalaya CLI's own table, one file being written
+/// by both wizards.
+///
+/// A key outside this list still renders, after the ones listed, so a
+/// field added to [`AccountConfig`] can never go missing from a
+/// generated document just because nobody updated this table.
+const RENDER_ORDER: [&str; 11] = [
+    "default",
+    "email",
+    "display-name",
+    "signature",
+    "signature-delim",
+    "imap",
+    "jmap",
+    "maildir",
+    "m2dir",
+    "smtp",
+    "mailbox",
+];
+
+impl AccountConfig {
+    /// Renders this account as an `[accounts.<name>]` block, ready to
+    /// be written to a configuration file or appended to one.
+    ///
+    /// The serializer decides what is written, so a field left at its
+    /// default is omitted and nothing has to be listed here twice.
+    /// What this adds is reading order: the flattened dotted keys come
+    /// out alphabetically, which buries `imap.server` under the
+    /// credentials that authenticate against it, and runs every group
+    /// together. The groups are reordered, `server` is lifted to the
+    /// top of its own, and a blank line separates them.
+    pub fn render(&self, name: &str) -> Result<String> {
+        // NOTE: borrowed rather than built into a `Config`, which would
+        // mean cloning the account to render it. The emitter only looks
+        // for an `accounts` table, so any shape carrying one will do.
+        #[derive(Serialize)]
+        struct AccountDocument<'a> {
+            accounts: HashMap<&'a str, &'a AccountConfig>,
+        }
+
+        let document = AccountDocument {
+            accounts: HashMap::from([(name, self)]),
+        };
+        let rendered = pimalaya_config::toml::to_string(&document)?;
+
+        // The emitter writes the header itself, and everything below it
+        // is one dotted key per line.
+        let (header, body) = match rendered.split_once('\n') {
+            Some((header, body)) => (header, body),
+            None => return Ok(rendered),
+        };
+
+        let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
+
+        for line in body.lines().filter(|line| !line.trim().is_empty()) {
+            let key = line.split(['.', ' ']).next().unwrap_or(line).to_string();
+
+            match groups.iter_mut().find(|(name, _)| *name == key) {
+                Some((_, lines)) => lines.push(line),
+                None => groups.push((key, vec![line])),
+            }
+        }
+
+        groups.sort_by_key(|(key, _)| {
+            RENDER_ORDER
+                .iter()
+                .position(|known| known == key)
+                .unwrap_or(RENDER_ORDER.len())
+        });
+
+        let mut document = format!("{header}\n");
+
+        for (index, (key, mut lines)) in groups.into_iter().enumerate() {
+            if index > 0 {
+                document.push('\n');
+            }
+
+            // The endpoint is what the group is about, so it reads
+            // first; the credentials and the quirks qualify it.
+            let server = format!("{key}.server ");
+            lines.sort_by_key(|line| !line.starts_with(&server));
+
+            for line in lines {
+                document.push_str(line);
+                document.push('\n');
+            }
+        }
+
+        Ok(document)
+    }
 }
 
 /// Parses a `server` field into a [`Url`].
@@ -290,7 +442,7 @@ pub struct ImapConfig {
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub starttls: bool,
     /// ALPN protocol identifiers offered during the TLS handshake. Set
     /// to `[]` to skip ALPN negotiation entirely. Left unset, the
@@ -304,7 +456,7 @@ pub struct ImapConfig {
     /// continuation request rather than inlining credentials with
     /// `AUTHENTICATE`. Coremail (126.com, 163.com) advertises it
     /// falsely.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub sasl_ir: Option<bool>,
     /// RFC 2971 `ID` extension quirks. Some providers (notably
     /// mail.qq.com, fastmail) require an `ID` exchange straight after
@@ -336,7 +488,7 @@ pub struct ImapIdConfig {
     /// When `true`, the auth coroutine chains an `ID` round-trip
     /// after the tagged auth response. Default `false` skips ID
     /// entirely.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub auto: bool,
 
     /// Parameters sent with the auto-ID command. Empty (default)
@@ -345,7 +497,7 @@ pub struct ImapIdConfig {
     /// `version`, `vendor`, `support-url`) or `NIL` for unknown keys;
     /// `false` always sends `NIL`. Keys absent from this map are not
     /// transmitted.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fields: HashMap<String, bool>,
 }
 
@@ -360,7 +512,7 @@ pub struct SmtpConfig {
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub starttls: bool,
     /// ALPN protocol identifiers offered during the TLS handshake. Set
     /// to `[]` to skip ALPN negotiation entirely. Left unset, the
@@ -680,6 +832,29 @@ mod tests {
     #[test]
     fn unlisted_scheme_is_rejected() {
         assert!(parse_server("ftp://mail.example.com", "imaps", &["imap", "imaps"]).is_err());
+    }
+
+    /// The himalaya CLI spells the identity `email` and `display-name`,
+    /// and one file backs both binaries, so a config its wizard wrote
+    /// must reach the same two fields the TUI composes from.
+    #[test]
+    fn the_identity_reads_under_the_cli_spelling() {
+        let config: Config = toml::from_str(
+            r#"
+            display-name = "Alice"
+
+            [accounts.example]
+            email = "alice@example.org"
+            display-name = "Alice at work"
+            "#,
+        )
+        .expect("the CLI spelling must deserialize");
+
+        let account = config.accounts.get("example").expect("the example account");
+
+        assert_eq!(config.display_name.as_deref(), Some("Alice"));
+        assert_eq!(account.from.as_deref(), Some("alice@example.org"));
+        assert_eq!(account.from_name.as_deref(), Some("Alice at work"));
     }
 
     /// The shipped sample is the field reference the README points at,
