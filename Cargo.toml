@@ -12,12 +12,11 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/himalaya-tui"
 
 [features]
-default = ["rustls-ring", "imap", "smtp", "jmap", "maildir", "m2dir"]
+default = ["rustls-ring", "imap", "smtp", "jmap", "maildir"]
 imap = ["dep:io-imap", "io-imap/client", "pimalaya-cli/imap"]
 smtp = ["dep:io-smtp", "io-smtp/client", "pimalaya-cli/smtp"]
 jmap = ["dep:io-jmap", "dep:base64", "io-jmap/client", "pimalaya-cli/jmap"]
 maildir = ["dep:io-maildir", "io-maildir/client", "io-maildir/parser"]
-m2dir = ["dep:io-m2dir", "io-m2dir/client"]
 native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-imap?/native-tls", "io-jmap?/native-tls", "io-smtp?/native-tls"]
 rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-imap?/rustls-aws", "io-jmap?/rustls-aws", "io-smtp?/rustls-aws"]
 rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-imap?/rustls-ring", "io-jmap?/rustls-ring", "io-smtp?/rustls-ring"]
@@ -41,7 +40,6 @@ edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
 io-imap = { version = "0.6", default-features = false, optional = true }
 io-jmap = { version = "0.3", default-features = false, optional = true }
-io-m2dir = { version = "0.2", default-features = false, optional = true }
 io-maildir = { version = "0.3", default-features = false, optional = true }
 io-pim-discovery = { version = "0.7", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "rfc8620"] }
 io-sasl = { version = "0.1", default-features = false, features = ["scram"] }

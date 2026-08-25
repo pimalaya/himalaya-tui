@@ -1,7 +1,7 @@
 //! SMTP adapter for the shared cross-protocol client.
 //!
 //! SMTP is send-only: it serves as a sending transport for storage
-//! backends that cannot send themselves (IMAP, Maildir, m2dir).
+//! backends that cannot send themselves (IMAP, Maildir).
 //! `send_message` derives the RFC 5321 envelope from the raw message
 //! headers (From: as the reverse path; To:/Cc:/Bcc: as the forward
 //! paths), then reuses [`SmtpClient`]'s `send`. The envelope parsing is

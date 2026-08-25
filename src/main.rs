@@ -9,8 +9,8 @@
 //! ## Backends and plumbing
 //!
 //! The network backends are io-imap, io-jmap and io-smtp; the local
-//! storage backends are io-maildir and io-m2dir. Account discovery comes
-//! from io-pim-discovery, which searches provider rules, PACC, Mozilla
+//! storage backend is io-maildir. Account discovery comes from
+//! io-pim-discovery, which searches provider rules, PACC, Mozilla
 //! autoconfig, RFC 6186 SRV and the RFC 8620 JMAP resolve in parallel. The
 //! terminal, prompt and wizard primitives, the TOML config loading and
 //! the blocking stream runtime come from pimalaya-cli, pimalaya-config
@@ -23,9 +23,9 @@
 //! The TUI runs over a local [`shared::client`] `EmailClient` that owns
 //! one `BackendClient` enum variant per compiled-in backend: the first
 //! configured storage backend (local before network), plus an optional
-//! SMTP transport for storage backends that cannot send (IMAP, Maildir,
-//! m2dir), connected lazily on the first send. Each operation resolves
-//! its mailbox argument to the backend-native id, then matches the
+//! SMTP transport for storage backends that cannot send (IMAP, Maildir),
+//! connected lazily on the first send. Each operation resolves its
+//! mailbox argument to the backend-native id, then matches the
 //! active backend and calls its per-protocol `backend.rs` adapter,
 //! which converts io-* results into the TUI's own [`email`] shared
 //! types (Envelope, Mailbox, Flag, Address).
@@ -59,8 +59,6 @@ mod email;
 mod imap;
 #[cfg(feature = "jmap")]
 mod jmap;
-#[cfg(feature = "m2dir")]
-mod m2dir;
 #[cfg(feature = "maildir")]
 mod maildir;
 mod shared;

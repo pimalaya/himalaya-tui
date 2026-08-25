@@ -338,7 +338,7 @@ imap.sasl.plain.password.raw = "***"
 # (a local pre-authenticated socket proxy such as sirup, over which no SASL
 # is negotiated) scheme. Any other scheme is rejected.
 #
-# A storage backend that cannot send on its own (IMAP, Maildir, m2dir) routes
+# A storage backend that cannot send on its own (IMAP, Maildir) routes
 # the composer through this block; JMAP sends on its own and ignores it. The
 # connection opens on the first send, not at startup.
 smtp.server = "example.com"

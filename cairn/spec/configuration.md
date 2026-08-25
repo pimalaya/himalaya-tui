@@ -65,7 +65,7 @@ Given a run whose standard input is not a terminal, when the wizard is reached, 
 
 ### Requirement: A configuration file valid for the CLI loads in the TUI
 
-Blocks both binaries model (`imap`, `smtp`, `jmap`, `maildir`, `m2dir`, and the `tls` and `sasl` tables inside them) accept every option the CLI accepts there. Options the TUI has no use for are accepted and ignored rather than rejected. Blocks and fields only one binary models are tolerated by the other.
+Blocks both binaries model (`imap`, `smtp`, `jmap`, `maildir`, and the `tls` and `sasl` tables inside them) accept every option the CLI accepts there. Options the TUI has no use for are accepted and ignored rather than rejected. Blocks and fields only one binary models are tolerated by the other.
 
 An account's identity SHALL be read under either spelling, `from` and `from-name` or `email` and `display-name`, and SHALL be written under the CLI's, the wizard filing into the file the CLI authors.
 
@@ -75,7 +75,7 @@ Given a configuration file setting `imap.sort.fallback`, which the CLI reads and
 
 #### Scenario: A backend the TUI does not support
 
-Given an account whose block configures `gmail`, when the TUI loads that file, then the block is ignored and the account's other backends stay usable.
+Given an account whose block configures `gmail` or `m2dir`, when the TUI loads that file, then the block is ignored and the account's other backends stay usable.
 
 #### Scenario: An identity written by the CLI
 

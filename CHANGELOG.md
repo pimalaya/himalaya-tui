@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Added the three-pane terminal interface: mailboxes, envelopes, and the message body or the composer.
-- Added the IMAP, JMAP, SMTP, Maildir and m2dir backends, each behind its own cargo feature.
+- Added the IMAP, JMAP, SMTP and Maildir backends, each behind its own cargo feature.
 
   Every `server` field takes a full `scheme://` URL or a bare authority carrying an optional port, and rejects a scheme the protocol does not speak. A `unix://` server is a pre-authenticated socket proxy such as sirup, over which no SASL is negotiated. The SMTP transport connects on the first send rather than at startup, and Maildir flags carry the custom keywords named by the `dovecot-keywords` sidecar or by the keywords header.
 

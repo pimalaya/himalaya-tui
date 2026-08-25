@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Strict least-common-denominator shape: only fields that are
 /// first-class in every protocol the interface targets (IMAP, JMAP,
-/// Maildir, m2dir). Protocol-specific data (IMAP delimiter and
+/// Maildir). Protocol-specific data (IMAP delimiter and
 /// SPECIAL-USE attributes, JMAP role and rights, Maildir path, …) is
 /// intentionally absent.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 pub struct Mailbox {
     /// Backend-specific identifier.
     ///
-    /// JMAP exposes a real opaque ID; for IMAP, Maildir and m2dir this
-    /// is the same as [`Self::name`]. Use this when issuing follow-up
+    /// JMAP exposes a real opaque ID; for IMAP and Maildir this is the
+    /// same as [`Self::name`]. Use this when issuing follow-up
     /// commands that refer to the mailbox.
     pub id: String,
 

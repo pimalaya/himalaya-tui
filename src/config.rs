@@ -257,7 +257,6 @@ pub struct AccountConfig {
     pub smtp: Option<SmtpConfig>,
     pub jmap: Option<JmapConfig>,
     pub maildir: Option<MaildirConfig>,
-    pub m2dir: Option<M2dirConfig>,
     /// Address this account sends as. Aliased to `email`, the
     /// spelling the himalaya CLI writes, the two binaries sharing one
     /// configuration file.
@@ -320,7 +319,7 @@ pub struct MailboxConfig {
 /// A key outside this list still renders, after the ones listed, so a
 /// field added to [`AccountConfig`] can never go missing from a
 /// generated document just because nobody updated this table.
-const RENDER_ORDER: [&str; 11] = [
+const RENDER_ORDER: [&str; 10] = [
     "default",
     "email",
     "display-name",
@@ -329,7 +328,6 @@ const RENDER_ORDER: [&str; 11] = [
     "imap",
     "jmap",
     "maildir",
-    "m2dir",
     "smtp",
     "mailbox",
 ];
@@ -572,15 +570,6 @@ pub struct MaildirConfig {
     pub root: PathBuf,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct M2dirConfig {
-    /// Filesystem root holding the m2store (a directory carrying a
-    /// `.m2store` marker). Each child mailbox is an m2dir with a
-    /// `.m2dir` marker.
-    pub root: PathBuf,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
@@ -739,6 +728,8 @@ impl SaslConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{Config, parse_server};
 
     /// Every option the himalaya CLI accepts in a block the TUI also
@@ -789,6 +780,31 @@ mod tests {
         );
         assert_eq!(jmap.identity_id.as_deref(), Some("I0123abc"));
         assert_eq!(jmap.drafts_mailbox_id.as_deref(), Some("M0123abc"));
+    }
+
+    /// A backend block this build does not model must be ignored rather
+    /// than rejected: one file backs both binaries and every feature set,
+    /// so a block the CLI writes, or one an older build wrote, cannot cost
+    /// the account the backends it still carries.
+    #[test]
+    fn a_backend_block_this_build_drops_is_ignored() {
+        let toml = r#"
+            [accounts.example]
+            default = true
+            maildir.root = "/tmp/mail"
+
+            gmail.token.raw = "***"
+            m2dir.root = "/tmp/m2store"
+        "#;
+
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let account = config.accounts.remove("example").unwrap();
+
+        assert_eq!(
+            account.maildir.unwrap().root,
+            PathBuf::from("/tmp/mail"),
+            "the modelled backend survives the blocks around it",
+        );
     }
 
     /// An omitted ALPN list must stay distinguishable from an explicit

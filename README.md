@@ -30,7 +30,7 @@
 ## Features
 
 - **IMAP**, **SMTP**, **JMAP** support
-- **Maildir** <sup>[specs](https://cr.yp.to/proto/maildir.html)</sup>, **m2dir** <sup>[specs](https://man.sr.ht/~bitfehler/m2dir/)</sup> support
+- **Maildir** <sup>[specs](https://cr.yp.to/proto/maildir.html)</sup> support
 - **Simple auth** support for IMAP and SMTP (anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256)
 - **HTTP auth** support for JMAP: basic, bearer
 - **TLS** support:

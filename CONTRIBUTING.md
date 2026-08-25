@@ -16,7 +16,7 @@ Everything below documents only what differs from the Pimalaya standards.
 Himalaya TUI is a thin terminal front-end on top of the Pimalaya email stack, driving the sans-I/O io- libraries. The same backend code powers the [himalaya](https://github.com/pimalaya/himalaya) CLI. Triage before patching, since protocol and storage fixes usually belong upstream:
 
 - IMAP, JMAP and SMTP wire semantics belong in [io-imap](https://github.com/pimalaya/io-imap), [io-jmap](https://github.com/pimalaya/io-jmap) and [io-smtp](https://github.com/pimalaya/io-smtp);
-- local storage semantics belong in [io-maildir](https://github.com/pimalaya/io-maildir) and [io-m2dir](https://github.com/pimalaya/io-m2dir);
+- local storage semantics belong in [io-maildir](https://github.com/pimalaya/io-maildir);
 - account discovery consumed by the wizard belongs in [io-pim-discovery](https://github.com/pimalaya/io-pim-discovery);
 - rendering, key handling, composition, the wizard and the shared cross-protocol surface live here.
 
@@ -24,7 +24,7 @@ The prompt, wizard and spinner primitives come from [pimalaya/cli](https://githu
 
 ## Feature matrix
 
-Himalaya TUI is a binary, not a layered library, so it has no coroutine/client split. Its cargo features gate the backends (`imap`, `smtp`, `jmap`, `maildir`, `m2dir`) and the TLS provider (`rustls-ring` default, `rustls-aws`, `native-tls`), all on by default. A build needs at least one storage backend (`imap`, `jmap`, `maildir` or `m2dir`); `smtp` alone is a transport with nothing to read. Build a reduced set to check the feature gates still hold when touching them:
+Himalaya TUI is a binary, not a layered library, so it has no coroutine/client split. Its cargo features gate the backends (`imap`, `smtp`, `jmap`, `maildir`) and the TLS provider (`rustls-ring` default, `rustls-aws`, `native-tls`), all on by default. A build needs at least one storage backend (`imap`, `jmap` or `maildir`); `smtp` alone is a transport with nothing to read. Build a reduced set to check the feature gates still hold when touching them:
 
 ```sh
 cargo build --no-default-features --features imap,smtp,rustls-ring

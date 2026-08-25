@@ -36,11 +36,6 @@ pub fn test_account(account_config: &AccountConfig) -> Result<()> {
         check_root("Maildir", &config.root)?;
     }
 
-    #[cfg(feature = "m2dir")]
-    if let Some(config) = &account_config.m2dir {
-        check_root("m2dir", &config.root)?;
-    }
-
     #[cfg(feature = "smtp")]
     if let Some(config) = &account_config.smtp {
         connect_smtp(config)?;
@@ -93,7 +88,7 @@ pub fn probe_imap_mechanisms(server: &str, starttls: bool) -> Result<Vec<SaslMec
 /// Fails when a local backend's root is missing or is not a directory.
 /// The wizard never creates it: a typo would otherwise silently open an
 /// empty mailbox.
-#[cfg(any(feature = "maildir", feature = "m2dir"))]
+#[cfg(feature = "maildir")]
 fn check_root(label: &str, root: &std::path::Path) -> Result<()> {
     use anyhow::bail;
 

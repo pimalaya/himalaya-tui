@@ -10,7 +10,7 @@
 //!   a second prompt among those advertised;
 //! - a `scheme://` URL searches from its host, its scheme narrowing the
 //!   results (`imap(s)` to IMAP + SMTP, an HTTP-family scheme to JMAP);
-//! - an existing folder is a local Maildir or m2dir.
+//! - an existing folder is a local Maildir.
 //!
 //! Only what discovery covers is configured: an input it finds nothing
 //! for stops the wizard and points at the documented sample. No OAuth
@@ -27,8 +27,6 @@ use url::Url;
 
 #[cfg(feature = "jmap")]
 use crate::config::JmapConfig;
-#[cfg(feature = "m2dir")]
-use crate::config::M2dirConfig;
 #[cfg(feature = "maildir")]
 use crate::config::MaildirConfig;
 #[cfg(all(feature = "imap", feature = "smtp"))]
@@ -37,8 +35,6 @@ use crate::config::{ImapConfig, SmtpConfig};
 use crate::wizard::imap_smtp;
 #[cfg(feature = "jmap")]
 use crate::wizard::jmap;
-#[cfg(any(feature = "maildir", feature = "m2dir"))]
-use crate::wizard::local;
 use crate::{
     config::AccountConfig,
     wizard::{
@@ -61,8 +57,6 @@ enum Chosen {
     Jmap(Box<JmapConfig>),
     #[cfg(feature = "maildir")]
     Maildir(MaildirConfig),
-    #[cfg(feature = "m2dir")]
-    M2dir(M2dirConfig),
 }
 
 /// Discovers one account from a single prompt, tests it, and hands back
@@ -167,8 +161,6 @@ fn build_account(account_name: &str, input: &str) -> Result<(AccountConfig, bool
         Chosen::Jmap(jmap) => account.jmap = Some(*jmap),
         #[cfg(feature = "maildir")]
         Chosen::Maildir(maildir) => account.maildir = Some(maildir),
-        #[cfg(feature = "m2dir")]
-        Chosen::M2dir(m2dir) => account.m2dir = Some(m2dir),
     }
 
     // NOTE: the aliases are the himalaya CLI's way of addressing a
@@ -292,8 +284,8 @@ fn dispatch(account_name: &str, email: &str, choice: Discovered) -> Result<Outco
     }
 }
 
-/// Configures a local backend from a typed folder path.
-#[cfg(any(feature = "maildir", feature = "m2dir"))]
+/// Configures the Maildir a typed folder path points at.
+#[cfg(feature = "maildir")]
 fn configure_local(input: &str) -> Result<Chosen> {
     let raw = input.strip_prefix("file://").unwrap_or(input);
     let root = shellexpand::tilde(raw).into_owned();
@@ -301,15 +293,10 @@ fn configure_local(input: &str) -> Result<Chosen> {
         bail!("No such folder `{raw}`");
     }
 
-    Ok(match local::configure(root.into())? {
-        #[cfg(feature = "maildir")]
-        local::Local::Maildir(config) => Chosen::Maildir(config),
-        #[cfg(feature = "m2dir")]
-        local::Local::M2dir(config) => Chosen::M2dir(config),
-    })
+    Ok(Chosen::Maildir(MaildirConfig { root: root.into() }))
 }
 
-#[cfg(not(any(feature = "maildir", feature = "m2dir")))]
+#[cfg(not(feature = "maildir"))]
 fn configure_local(input: &str) -> Result<Chosen> {
     bail!("`{input}` looks like a folder path, but no local backend is compiled in")
 }

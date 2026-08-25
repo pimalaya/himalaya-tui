@@ -3,7 +3,7 @@
 //! Mirrors the himalaya CLI: a single storage backend (the first
 //! configured one, local before network) held in a [`BackendClient`]
 //! enum, plus an optional SMTP transport for accounts whose storage
-//! backend cannot send (IMAP, Maildir, m2dir). Each method matches the
+//! backend cannot send (IMAP, Maildir). Each method matches the
 //! active backend and calls its adapter (the per-protocol
 //! `<proto>/backend.rs`), which takes and returns the shared
 //! [`crate::email`] types.
@@ -17,8 +17,6 @@ use anyhow::{Result, anyhow, bail};
 use crate::imap::client::ImapClient;
 #[cfg(feature = "jmap")]
 use crate::jmap::client::JmapClient;
-#[cfg(feature = "m2dir")]
-use crate::m2dir::client::M2dirClient;
 #[cfg(feature = "maildir")]
 use crate::maildir::client::MaildirClient;
 use crate::{
@@ -60,8 +58,6 @@ enum BackendClient {
     Jmap(Box<JmapClient>),
     #[cfg(feature = "maildir")]
     Maildir(Box<MaildirClient>),
-    #[cfg(feature = "m2dir")]
-    M2dir(Box<M2dirClient>),
 }
 
 impl EmailClient {
@@ -101,8 +97,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.ping(),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.ping(),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.ping(),
         }
     }
 
@@ -115,8 +109,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.list_mailboxes(with_counts),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.list_mailboxes(with_counts),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.list_mailboxes(with_counts),
         }
     }
 
@@ -144,10 +136,6 @@ impl EmailClient {
             BackendClient::Maildir(client) => {
                 client.list_envelopes(mailbox, page, page_size, with_attachment)
             }
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => {
-                client.list_envelopes(mailbox, page, page_size, with_attachment)
-            }
         }
     }
 
@@ -163,8 +151,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.get_message(mailbox, id),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.get_message(mailbox, id),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.get_message(mailbox, id),
         }
     }
 
@@ -186,8 +172,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.store_flags(mailbox, ids, flags, op),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.store_flags(mailbox, ids, flags, op),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.store_flags(mailbox, ids, flags, op),
         }
     }
 
@@ -203,8 +187,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.add_message(mailbox, flags, raw),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.add_message(mailbox, flags, raw),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.add_message(mailbox, flags, raw),
         }
     }
 
@@ -222,8 +204,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.copy_messages(from, to, ids),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.copy_messages(from, to, ids),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.copy_messages(from, to, ids),
         }
     }
 
@@ -241,8 +221,6 @@ impl EmailClient {
             BackendClient::Jmap(client) => client.move_messages(from, to, ids),
             #[cfg(feature = "maildir")]
             BackendClient::Maildir(client) => client.move_messages(from, to, ids),
-            #[cfg(feature = "m2dir")]
-            BackendClient::M2dir(client) => client.move_messages(from, to, ids),
         }
     }
 
@@ -267,7 +245,7 @@ impl EmailClient {
 
     /// Maps the interface's human mailbox name onto the backend-native
     /// id the operation methods expect. Identity for every backend whose
-    /// name already is its id (IMAP, Maildir, m2dir); JMAP resolves the
+    /// name already is its id (IMAP, Maildir); JMAP resolves the
     /// opaque mailbox id via a cached `Mailbox/get`. Applied by the
     /// mailbox-addressing methods above before they dispatch, so each
     /// per-protocol adapter only ever receives ids. Idempotent: an
@@ -311,25 +289,13 @@ impl EmailClient {
 /// local before network to match the retired io-email dispatcher's read
 /// priority.
 #[cfg_attr(
-    not(any(
-        feature = "maildir",
-        feature = "m2dir",
-        feature = "jmap",
-        feature = "imap"
-    )),
+    not(any(feature = "maildir", feature = "jmap", feature = "imap")),
     allow(unused_variables)
 )]
 fn select_storage(account_config: &mut AccountConfig) -> Result<Option<BackendClient>> {
     #[cfg(feature = "maildir")]
     if let Some(config) = account_config.maildir.take() {
         return Ok(Some(BackendClient::Maildir(Box::new(MaildirClient::new(
-            config,
-        )))));
-    }
-
-    #[cfg(feature = "m2dir")]
-    if let Some(config) = account_config.m2dir.take() {
-        return Ok(Some(BackendClient::M2dir(Box::new(M2dirClient::new(
             config,
         )))));
     }
