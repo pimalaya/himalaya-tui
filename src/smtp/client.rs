@@ -17,6 +17,7 @@ use io_sasl::mechanism::Sasl;
 use io_smtp::{
     client::SmtpClientStd as Inner, rfc5321::SmtpEhloDomain, session::SmtpSessionOpenOptions,
 };
+use pimalaya_config::secret::SecretResolver;
 use url::Url;
 
 use crate::config::{SmtpConfig, parse_server};
@@ -28,7 +29,10 @@ pub struct SmtpClient {
 
 impl SmtpClient {
     /// Opens the SMTP connection: TCP/TLS/STARTTLS, greeting, EHLO, SASL.
-    pub fn new(config: SmtpConfig) -> Result<Self> {
+    ///
+    /// The credential is resolved on `resolver`, shared with the storage
+    /// backend when both name the same command.
+    pub fn new(config: SmtpConfig, resolver: &mut SecretResolver) -> Result<Self> {
         let tls = config
             .tls
             .into_tls(config.alpn.unwrap_or_else(Inner::default_alpn));
@@ -47,7 +51,7 @@ impl SmtpClient {
                 let port = server
                     .port()
                     .unwrap_or(Inner::default_port(server.scheme()));
-                Some(cfg.try_into_sasl(host, port)?)
+                Some(cfg.try_into_sasl(host, port, resolver)?)
             }
             None => None,
         };

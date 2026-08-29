@@ -11,6 +11,7 @@
 use anyhow::Result;
 #[cfg(feature = "imap")]
 use io_sasl::mechanism::SaslMechanism;
+use pimalaya_config::secret::SecretResolver;
 
 use crate::config::AccountConfig;
 #[cfg(feature = "imap")]
@@ -22,15 +23,24 @@ use crate::config::ImapConfig;
 /// For the flows that configure without connecting (the local
 /// backends): the IMAP+SMTP and JMAP flows test each connection as they
 /// prompt for it, and tell the wizard to skip this.
+///
+/// One resolver serves them all, so an account pointing its storage and
+/// its submission credential at the same command unlocks once.
+#[cfg_attr(
+    not(any(feature = "imap", feature = "jmap", feature = "smtp")),
+    allow(unused_mut, unused_variables)
+)]
 pub fn test_account(account_config: &AccountConfig) -> Result<()> {
+    let mut resolver = SecretResolver::new();
+
     #[cfg(feature = "imap")]
     if let Some(config) = &account_config.imap {
-        connect_imap(config)?;
+        connect_imap(config, &mut resolver)?;
     }
 
     #[cfg(feature = "jmap")]
     if let Some(config) = &account_config.jmap {
-        crate::jmap::client::JmapClient::new(config.clone())?;
+        crate::jmap::client::JmapClient::new(config.clone(), &mut resolver)?;
     }
 
     #[cfg(feature = "maildir")]
@@ -40,23 +50,26 @@ pub fn test_account(account_config: &AccountConfig) -> Result<()> {
 
     #[cfg(feature = "smtp")]
     if let Some(config) = &account_config.smtp {
-        connect_smtp(config)?;
+        connect_smtp(config, &mut resolver)?;
     }
 
     Ok(())
 }
 
-/// Opens an IMAP session and drops it.
+/// Opens an IMAP session and drops it, resolving on `resolver`.
 #[cfg(feature = "imap")]
-pub fn connect_imap(config: &ImapConfig) -> Result<()> {
-    crate::imap::client::ImapClient::new(config.clone())?;
+pub fn connect_imap(config: &ImapConfig, resolver: &mut SecretResolver) -> Result<()> {
+    crate::imap::client::ImapClient::new(config.clone(), resolver)?;
     Ok(())
 }
 
-/// Opens an SMTP session and drops it.
+/// Opens an SMTP session and drops it, resolving on `resolver`.
 #[cfg(feature = "smtp")]
-pub fn connect_smtp(config: &crate::config::SmtpConfig) -> Result<()> {
-    crate::smtp::client::SmtpClient::new(config.clone())?;
+pub fn connect_smtp(
+    config: &crate::config::SmtpConfig,
+    resolver: &mut SecretResolver,
+) -> Result<()> {
+    crate::smtp::client::SmtpClient::new(config.clone(), resolver)?;
     Ok(())
 }
 

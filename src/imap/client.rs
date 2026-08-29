@@ -18,6 +18,7 @@ use io_imap::{
     },
 };
 use io_sasl::mechanism::Sasl;
+use pimalaya_config::secret::SecretResolver;
 use url::Url;
 
 use crate::config::{ImapConfig, ImapIdConfig, parse_server};
@@ -33,7 +34,10 @@ pub struct ImapClient {
 
 impl ImapClient {
     /// Opens the IMAP connection: TCP/TLS/STARTTLS, greeting then SASL.
-    pub fn new(config: ImapConfig) -> Result<Self> {
+    ///
+    /// The credential is resolved on `resolver`, shared with the other
+    /// backends of the same account.
+    pub fn new(config: ImapConfig, resolver: &mut SecretResolver) -> Result<Self> {
         let tls = config
             .tls
             .into_tls(config.alpn.unwrap_or_else(default_alpn));
@@ -50,7 +54,7 @@ impl ImapClient {
                 // NOTE: url does not know the imap(s) default ports, so
                 // fall back to the scheme defaults io-imap connects with.
                 let port = server.port().unwrap_or(default_port(server.scheme()));
-                Some(cfg.try_into_sasl(host, port)?)
+                Some(cfg.try_into_sasl(host, port, resolver)?)
             }
             None => None,
         };

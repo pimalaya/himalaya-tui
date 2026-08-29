@@ -15,6 +15,7 @@ use anyhow::{Result, bail};
 use io_pim_discovery::compose::config::DiscoverySecurity;
 use io_sasl::mechanism::SaslMechanism;
 use pimalaya_cli::{prompt, spinner::Spinner};
+use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::{
@@ -40,6 +41,9 @@ const XOAUTH2: &str = "XOAUTH2 (username + API token)";
 /// Both connections are validated here, so the caller skips the final
 /// account test. The discovered `mailbox.alias.*` entries (the IMAP
 /// inbox) come back alongside the configs.
+///
+/// One resolver serves both tests, so accepting the offer to reuse the
+/// IMAP credential for SMTP costs a single unlock.
 pub fn configure_discovered(
     account_name: &str,
     email: &str,
@@ -64,7 +68,8 @@ pub fn configure_discovered(
         probed.as_deref(),
     )?;
     let imap = imap_config(imap, imap_sasl.clone());
-    test_connection("IMAP", || check::connect_imap(&imap))?;
+    let mut resolver = SecretResolver::new();
+    test_connection("IMAP", || check::connect_imap(&imap, &mut resolver))?;
 
     let aliases = mailbox::imap_aliases();
 
@@ -80,7 +85,7 @@ pub fn configure_discovered(
                 prompt_sasl(account_name, login_hint.as_deref(), discovered.auth, None)?
             };
             let smtp = smtp_config(endpoint, smtp_sasl);
-            test_connection("SMTP", || check::connect_smtp(&smtp))?;
+            test_connection("SMTP", || check::connect_smtp(&smtp, &mut resolver))?;
             Some(smtp)
         }
         None => None,

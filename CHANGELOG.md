@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   The SMTP transport connects on the first send rather than at startup, and Maildir flags carry the custom keywords named by the `dovecot-keywords` sidecar or by the keywords header.
 
 - Added the anonymous, login, plain, oauthbearer, xoauth2 and scram-sha-256 SASL mechanisms, plus basic and bearer HTTP authentication for JMAP.
+
+  A credential command named by more than one block of an account is spawned once per resolution rather than once per block, so a `pass` or `gpg` entry backing both IMAP and SMTP unlocks once where the wizard used to ask for it twice.
 - Added the setup wizard, run when the configuration resolves no account.
 
   It is the himalaya CLI's wizard prompt for prompt: one prompt for an email address, a parallel search of the services reachable from it, a pick list of those that answered, the authentication that service advertised, and a connection test before the account is accepted.

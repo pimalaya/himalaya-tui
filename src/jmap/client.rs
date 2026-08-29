@@ -9,6 +9,7 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{Result, anyhow};
 use base64::{Engine, prelude::BASE64_STANDARD};
 use io_jmap::{client::JmapClientStd as Inner, rfc8621::mailbox::get::JmapMailboxGetOptions};
+use pimalaya_config::secret::SecretResolver;
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
@@ -36,12 +37,15 @@ impl JmapClient {
     ///
     /// TLS-connects to the configured server, then fetches the session
     /// object.
-    pub fn new(config: JmapConfig) -> Result<Self> {
+    ///
+    /// The credential is resolved on `resolver`, shared with the other
+    /// backends of the same account.
+    pub fn new(config: JmapConfig, resolver: &mut SecretResolver) -> Result<Self> {
         let tls = config
             .tls
             .clone()
             .into_tls(config.alpn.clone().unwrap_or_else(Inner::default_alpn));
-        let http_auth = jmap_http_auth(config.auth.clone())?;
+        let http_auth = jmap_http_auth(config.auth.clone(), resolver)?;
         let url = parse_jmap_server(&config.server)?;
 
         let mut inner = Inner::connect(&url, &tls, http_auth)?;
@@ -112,6 +116,10 @@ impl JmapClient {
     /// while the API is on api.fastmail.com. Reusing the API socket for
     /// a foreign host earns a 302 to its docs page, failing the
     /// non-redirectable download.
+    ///
+    /// The foreign session resolves the credential on a resolver of its
+    /// own, the account's having been dropped with the assembly that
+    /// built it.
     pub fn download_blob(&mut self, download_url: &Url) -> Result<Vec<u8>> {
         let api_url = {
             let session = self
@@ -129,7 +137,7 @@ impl JmapClient {
             .tls
             .clone()
             .into_tls(self.config.alpn.clone().unwrap_or_else(Inner::default_alpn));
-        let http_auth = jmap_http_auth(self.config.auth.clone())?;
+        let http_auth = jmap_http_auth(self.config.auth.clone(), &mut SecretResolver::new())?;
         let mut download_client = Inner::connect(download_url, &tls, http_auth)?;
 
         Ok(download_client.blob_download(download_url)?)
@@ -160,15 +168,22 @@ pub fn parse_jmap_server(server: &str) -> Result<Url> {
 }
 
 /// Formats a [`JmapAuthConfig`] into an HTTP `Authorization` value.
-pub fn jmap_http_auth(config: JmapAuthConfig) -> Result<SecretString> {
+///
+/// The credential goes through `resolver`, so an account naming one
+/// command from several fields spawns it once.
+pub fn jmap_http_auth(
+    config: JmapAuthConfig,
+    resolver: &mut SecretResolver,
+) -> Result<SecretString> {
     match config {
-        JmapAuthConfig::Header(token) => Ok(token.get()?),
+        JmapAuthConfig::Header(token) => Ok(resolver.resolve(token)?),
         JmapAuthConfig::Bearer { token } => {
-            let token = token.get()?;
+            let token = resolver.resolve(token)?;
             Ok(format!("Bearer {}", token.expose_secret()).into())
         }
         JmapAuthConfig::Basic { username, password } => {
-            let creds = format!("{}:{}", username, password.get()?.expose_secret());
+            let password = resolver.resolve(password)?;
+            let creds = format!("{}:{}", username, password.expose_secret());
             let encoded = BASE64_STANDARD.encode(creds.into_bytes());
             Ok(format!("Basic {encoded}").into())
         }

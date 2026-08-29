@@ -48,7 +48,7 @@ log = "0.4"
 mail-parser = "0.11"
 mime-meta-language = { version = "1.1", default-features = false, features = ["compiler", "interpreter"] }
 pimalaya-cli = { version = "0.2", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
-pimalaya-config = { version = "0.1", default-features = false, features = ["toml", "secret"] }
+pimalaya-config = { version = "0.2", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }
 ratatui = { version = "0.30", features = ["serde"] }
 rfc2047-decoder = "1"

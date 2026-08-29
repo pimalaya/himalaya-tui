@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, bail};
 use pimalaya_cli::{prompt, spinner::Spinner};
+use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::{JmapAuthConfig, JmapConfig},
@@ -56,7 +57,7 @@ pub fn configure_discovered(
 fn test_and_discover(config: &JmapConfig) -> Result<HashMap<String, String>> {
     let spinner = Spinner::start("Testing JMAP connection");
 
-    let mut client = match JmapClient::new(config.clone()) {
+    let mut client = match JmapClient::new(config.clone(), &mut SecretResolver::new()) {
         Ok(client) => client,
         Err(err) => {
             spinner.failure("JMAP connection failed");

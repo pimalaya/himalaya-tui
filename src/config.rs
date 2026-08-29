@@ -25,7 +25,7 @@ use io_sasl::{
     rfc7628::oauthbearer::SaslOauthbearerCreds, xoauth2::SaslXoauth2Creds,
 };
 use pimalaya_config::{
-    secret::Secret,
+    secret::{Secret, SecretResolver},
     toml::{TomlConfig, shell_expanded_string},
 };
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
@@ -694,34 +694,42 @@ impl SaslConfig {
     ///
     /// `host` and `port` come from the live server URL and are read by
     /// OAUTHBEARER alone, which echoes them in its GS2 header.
-    pub fn try_into_sasl(self, host: impl ToString, port: u16) -> Result<Sasl> {
+    ///
+    /// The credential goes through `resolver`, so an account naming one
+    /// command from several fields spawns it once.
+    pub fn try_into_sasl(
+        self,
+        host: impl ToString,
+        port: u16,
+        resolver: &mut SecretResolver,
+    ) -> Result<Sasl> {
         Ok(match self {
             SaslConfig::Anonymous(c) => Sasl::Anonymous(SaslAnonymousCreds { message: c.message }),
             SaslConfig::Login(c) => Sasl::Login(SaslLoginCreds {
                 username: c.username,
-                password: c.password.get()?,
+                password: resolver.resolve(c.password)?,
             }),
             SaslConfig::Plain(c) => Sasl::Plain(SaslPlainCreds {
                 authzid: c.authzid,
                 authcid: c.authcid,
-                passwd: c.passwd.get()?,
+                passwd: resolver.resolve(c.passwd)?,
             }),
             SaslConfig::Oauthbearer(c) => Sasl::Oauthbearer(SaslOauthbearerCreds {
                 username: c.username,
                 host: host.to_string(),
                 port,
-                token: c.token.get()?,
+                token: resolver.resolve(c.token)?,
             }),
             SaslConfig::Xoauth2(c) => Sasl::Xoauth2(SaslXoauth2Creds {
                 username: c.username,
-                token: c.token.get()?,
+                token: resolver.resolve(c.token)?,
             }),
             // NOTE: an empty nonce means "draw one for me": the client
             // fills it before the exchange, an I/O-free coroutine having
             // no way to generate randomness itself.
             SaslConfig::ScramSha256(c) => Sasl::ScramSha256(SaslScramCreds {
                 username: c.username,
-                password: c.password.get()?,
+                password: resolver.resolve(c.password)?,
                 nonce: Vec::new(),
                 channel_binding: SaslGs2ChannelBinding::Unsupported,
             }),
@@ -734,6 +742,47 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{Config, parse_server};
+
+    /// The reason a resolver is threaded through the backends: two
+    /// blocks of one account naming one command pay a single spawn,
+    /// which for a `pass` or `gpg` entry is a single key unlock.
+    #[test]
+    #[cfg(unix)]
+    fn one_command_named_by_two_blocks_is_spawned_once() {
+        use std::{env::temp_dir, fs, process};
+
+        use pimalaya_config::{
+            command::CommandConfig,
+            secret::{Secret, SecretResolver},
+        };
+
+        use super::{SaslConfig, SaslPlainConfig};
+
+        let path = temp_dir().join(format!("himalaya-tui-resolve-once-{}", process::id()));
+        let _ = fs::remove_file(&path);
+
+        // Counts its own runs, one byte per spawn, then prints a secret.
+        let line = format!("printf x >> {path}; printf s3cr3t", path = path.display());
+        let sasl = || {
+            SaslConfig::Plain(SaslPlainConfig {
+                authzid: None,
+                authcid: String::from("user"),
+                passwd: Secret::Command(CommandConfig::Shell(line.clone())),
+            })
+        };
+
+        let mut resolver = SecretResolver::new();
+        sasl()
+            .try_into_sasl("localhost", 993, &mut resolver)
+            .unwrap();
+        sasl()
+            .try_into_sasl("localhost", 465, &mut resolver)
+            .unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"x");
+
+        fs::remove_file(&path).unwrap();
+    }
 
     /// Every option the himalaya CLI accepts in a block modelled here
     /// must load, acted on or not: one file backs both binaries, and a

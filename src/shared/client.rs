@@ -12,6 +12,7 @@
 use std::mem;
 
 use anyhow::{Result, anyhow, bail};
+use pimalaya_config::secret::SecretResolver;
 
 #[cfg(feature = "imap")]
 use crate::imap::client::ImapClient;
@@ -64,8 +65,13 @@ impl EmailClient {
     ///
     /// The storage backend is the first configured one, local before
     /// network; an SMTP transport joins it when the account declares one.
+    ///
+    /// The secrets are resolved on one [`SecretResolver`] built here and
+    /// dropped with the assembly, so nothing holds a plaintext
+    /// credential beyond the connections it opened.
     pub fn new(#[allow(unused_mut)] mut account_config: AccountConfig) -> Result<Self> {
-        let storage = select_storage(&mut account_config)?;
+        let mut resolver = SecretResolver::new();
+        let storage = select_storage(&mut account_config, &mut resolver)?;
 
         // NOTE: staying unconnected lets a read-only session open no SMTP
         // connection, and a single-session proxy such as sirup serve the
@@ -256,6 +262,10 @@ impl EmailClient {
     }
 
     /// The SMTP transport, connected on this first use, [`None`] if absent.
+    ///
+    /// Its credential is resolved here rather than at assembly, so a
+    /// session that never sends spawns no command for it, and on a
+    /// resolver of its own, the account's being long gone.
     #[cfg(feature = "smtp")]
     fn smtp_mut(&mut self) -> Result<Option<&mut SmtpClient>> {
         if let SmtpTransport::Pending(_) = &self.smtp {
@@ -264,7 +274,7 @@ impl EmailClient {
             else {
                 unreachable!()
             };
-            self.smtp = SmtpTransport::Ready(SmtpClient::new(*config)?);
+            self.smtp = SmtpTransport::Ready(SmtpClient::new(*config, &mut SecretResolver::new())?);
         }
 
         Ok(match &mut self.smtp {
@@ -284,11 +294,11 @@ impl EmailClient {
 ///
 /// Local before network, matching the retired io-email dispatcher's read
 /// priority.
-#[cfg_attr(
-    not(any(feature = "maildir", feature = "jmap", feature = "imap")),
-    allow(unused_variables)
-)]
-fn select_storage(account_config: &mut AccountConfig) -> Result<Option<BackendClient>> {
+#[cfg_attr(not(any(feature = "jmap", feature = "imap")), allow(unused_variables))]
+fn select_storage(
+    account_config: &mut AccountConfig,
+    resolver: &mut SecretResolver,
+) -> Result<Option<BackendClient>> {
     #[cfg(feature = "maildir")]
     if let Some(config) = account_config.maildir.take() {
         return Ok(Some(BackendClient::Maildir(Box::new(MaildirClient::new(
@@ -299,14 +309,14 @@ fn select_storage(account_config: &mut AccountConfig) -> Result<Option<BackendCl
     #[cfg(feature = "jmap")]
     if let Some(config) = account_config.jmap.take() {
         return Ok(Some(BackendClient::Jmap(Box::new(JmapClient::new(
-            config,
+            config, resolver,
         )?))));
     }
 
     #[cfg(feature = "imap")]
     if let Some(config) = account_config.imap.take() {
         return Ok(Some(BackendClient::Imap(Box::new(ImapClient::new(
-            config,
+            config, resolver,
         )?))));
     }
 
