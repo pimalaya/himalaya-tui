@@ -1,7 +1,11 @@
+//! # View
+//!
 //! View layer of the Elm Architecture: every render path is rooted at
-//! [`render`]. Reads [`Model`] (and adjusts the `*_offset` scroll
-//! fields during layout); never produces a [`crate::tui::model::Message`]
-//! or touches [`crate::tui::update`].
+//! [`render`], which reads the [`Model`] and adjusts its `*_offset`
+//! scroll fields during layout.
+//!
+//! Nothing here produces a [`crate::tui::model::Message`] or touches
+//! [`crate::tui::update`].
 
 use edtui::{EditorTheme, EditorView};
 use ratatui::{
@@ -29,8 +33,7 @@ use crate::{
     },
 };
 
-/// View entry point. Lays out the header, the three-pane main area
-/// and the status bar, then overlays any open modal dialog.
+/// View entry point: header, main area, status bar, then dialog overlay.
 pub fn render(model: &mut Model, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -60,8 +63,7 @@ fn render_main(frame: &mut Frame, model: &mut Model, area: Rect) {
 fn render_right_panel(frame: &mut Frame, model: &mut Model, area: Rect) {
     // NOTE: measured on the whole right panel rather than on the
     // envelope pane, so opening a message or the composer does not
-    // re-page the list under the cursor: what the page holds follows
-    // the terminal, not what else is on screen.
+    // re-page the list under the cursor.
     model.envelope_capacity = envelope_capacity(area.height);
 
     match model.bottom_panel {
@@ -148,9 +150,6 @@ fn render_mailboxes(frame: &mut Frame, model: &mut Model, area: Rect) {
         .block(block)
         .highlight_style(model.theme.cursor);
 
-    // Page-style scrolling: when the cursor leaves the visible
-    // window, snap the offset so the new selection sits at the page
-    // edge. Inner height = total height minus top+bottom borders.
     let inner_height = area.height.saturating_sub(2) as usize;
     if inner_height > 0 {
         if model.mailbox_index >= model.mailbox_offset + inner_height {
@@ -226,7 +225,6 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
         .block(block)
         .row_highlight_style(model.theme.cursor);
 
-    // Page-style scrolling, as in render_mailboxes.
     let inner_height = envelope_capacity(area.height);
     if inner_height > 0 {
         if model.envelope_index >= model.envelope_offset + inner_height {
@@ -245,8 +243,9 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
     frame.render_stateful_widget(table, area, &mut state);
 }
 
-/// Envelope rows a panel of `height` can show: its two borders and the
-/// column header above them are not envelopes.
+/// Envelope rows a panel of `height` can show.
+///
+/// The two borders and the column header above them are not envelopes.
 pub fn envelope_capacity(height: u16) -> usize {
     height.saturating_sub(3) as usize
 }
@@ -328,7 +327,7 @@ fn render_message(frame: &mut Frame, model: &Model, area: Rect) {
     let max_scroll = total_lines.saturating_sub(inner_height);
     let scroll = model.message_scroll.min(max_scroll);
 
-    // `trim: false` keeps indentation on wrapped lines so quoted
+    // NOTE: trim: false keeps indentation on wrapped lines so quoted
     // blocks and long headers stay legible.
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
@@ -358,8 +357,8 @@ fn render_message(frame: &mut Frame, model: &Model, area: Rect) {
 }
 
 fn render_compose(frame: &mut Frame, model: &mut Model, area: Rect) {
-    // Emacs binds `Ctrl-e` to "move to end of line", so only Vim
-    // exposes it as the system-editor shortcut (alongside `Alt-e`).
+    // NOTE: Emacs binds Ctrl-e to "move to end of line", so only Vim
+    // exposes it as a system-editor shortcut.
     let editor_hint = match model.keybinds.unwrap_or_default() {
         Keybinds::Vim => "Ctrl-e or Alt-e: open in $EDITOR",
         Keybinds::Emacs => "Alt-e: open in $EDITOR",
@@ -423,9 +422,10 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
     }
 }
 
-/// Two centered stacked frames: top has the title + a `> ` prompt
-/// and the filter input; bottom is an untitled, fixed-height results
-/// frame so the dialog size does not jump as the filter narrows.
+/// Renders the titled filter input above a fixed-height result list.
+///
+/// The fixed height keeps the dialog from jumping as the filter narrows
+/// the list.
 fn render_mailbox_dialog(frame: &mut Frame, model: &Model, title: &str) {
     const INPUT_BOX_HEIGHT: u16 = 3;
     const PROMPT: &str = "> ";

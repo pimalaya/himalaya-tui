@@ -1,8 +1,11 @@
-//! Update layer of the Elm Architecture: every state transition and
-//! every side effect lives behind [`apply`]. Raw key events enter as
-//! [`Message::Key`] and are dispatched in context by [`translate_key`].
-//! All I/O goes through `model.client`; the model is the sole owner
-//! of both UI state and the email client.
+//! # Update
+//!
+//! Update layer of the Elm Architecture: every state transition and every
+//! side effect lives behind [`apply`], raw key events entering as
+//! [`Message::Key`] and dispatched in context by [`translate_key`].
+//!
+//! All I/O goes through `model.client`: the model is the sole owner of
+//! both the UI state and the email client.
 
 use std::{slice, time::Instant};
 
@@ -33,6 +36,7 @@ use crate::{
     },
 };
 
+/// Applies a message and every message it cascades into.
 pub fn apply_all(model: &mut Model, mut next_msg: Option<Message>) {
     while let Some(msg) = next_msg {
         next_msg = apply(model, msg);
@@ -179,9 +183,9 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
 }
 
 fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
-    // Composer owns its keys; only Esc and Alt-e are intercepted. Esc
-    // reuses Message::Esc so apply() can dispatch by model state
-    // (composer-mode Esc opens the compose dialog instead of quitting).
+    // NOTE: Esc reuses Message::Esc instead of a composer-local message
+    // so apply can dispatch on model state: in the composer it opens the
+    // compose dialog rather than quitting.
     if model.dialog.is_none() && model.active_panel == Panel::Compose {
         if key.code == KeyCode::Esc {
             return Some(Message::Esc);
@@ -261,7 +265,6 @@ fn mailbox_filter_input(model: &mut Model, key: KeyEvent) {
     };
     let Some(req) = req else { return };
     model.mailbox_filter.handle(req);
-    // Filter changed; snap selection to top of the narrowed list.
     model.dialog_index = 0;
 }
 
@@ -293,9 +296,9 @@ fn toggle_panel(model: &mut Model) {
     };
 }
 
-/// Moves one item down, crossing into the next page when the envelope
-/// list runs out: a mailbox is one list to the reader, whatever the
-/// page size cuts it into.
+/// Moves one item down, crossing pages when the envelope list runs out.
+///
+/// A mailbox reads as one list, whatever the page size cuts it into.
 fn next_item(model: &mut Model) -> Option<Message> {
     match model.active_panel {
         Panel::Mailboxes => {
@@ -319,8 +322,7 @@ fn next_item(model: &mut Model) -> Option<Message> {
     None
 }
 
-/// Moves one item up, crossing into the previous page from the first
-/// envelope and landing on its last, the mirror of [`next_item`].
+/// Moves one item up, crossing back to the previous page's last envelope.
 fn previous_item(model: &mut Model) -> Option<Message> {
     match model.active_panel {
         Panel::Mailboxes => {
@@ -399,10 +401,11 @@ fn set_mailboxes(model: &mut Model, mailboxes: Vec<Mailbox>) {
     model.status_message = None;
 }
 
-/// Adopts the row count the last render measured as the page size, and
-/// returns the load that re-pages the list around the envelope the
-/// cursor is on. `None` when the page already matches the screen,
-/// which is every frame but the first and the ones following a resize.
+/// Adopts the row count the last render measured as the page size.
+///
+/// Returns the load that re-pages the list around the envelope under the
+/// cursor, or `None` when the page already matches the screen, which is
+/// every frame but the first and those following a resize.
 pub fn adopt_envelope_capacity(model: &mut Model) -> Option<Message> {
     let capacity = model.envelope_capacity;
 
@@ -465,8 +468,6 @@ fn open_dialog(model: &mut Model, dialog: Dialog) {
 
 fn close_dialog(model: &mut Model) {
     model.dialog = None;
-    // The filter is dialog-local state; closing the dialog resets it
-    // so the next open starts from a clean slate.
     model.mailbox_filter.reset();
 }
 
@@ -594,9 +595,9 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
         return;
     };
 
-    // NOTE: the builder no longer interprets the source, so the quote
-    // is rendered here. mml carries no PGP backend in this build, so
-    // an encrypted thread quotes as an unresolved marker.
+    // NOTE: the builder does not interpret the source, so the quote is
+    // rendered here. mml carries no PGP backend in this build, so an
+    // encrypted thread quotes as an unresolved marker.
     let quote = match MmlTemplateReplyBuilder::quote_options().interpret_msg(&msg) {
         Ok(quote) => quote,
         Err(err) => {
@@ -682,11 +683,10 @@ fn load_mailboxes(model: &mut Model) -> Option<Message> {
     }
 }
 
-/// Loads the current page of the selected mailbox, landing the
-/// selection on the end `landing` names.
+/// Loads the current page of the selected mailbox, selecting `landing`.
 ///
-/// The total comes from the backend rather than from the page, which
-/// cannot tell a full page from the end of the mailbox.
+/// The total comes from the backend, not from the page, which cannot tell
+/// a full page from the end of the mailbox.
 fn load_envelopes(model: &mut Model, landing: EnvelopeLanding) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
@@ -892,10 +892,10 @@ fn do_preview(model: &mut Model) {
 }
 
 fn do_save_draft(model: &mut Model) {
-    // Drafts are unfinished by nature, so we save the composer buffer
-    // verbatim (raw MML, partial headers). IMAP APPEND requires CRLF
-    // line endings; edtui emits bare `\n`. Normalize first to avoid
-    // doubling up if a `\r\n` already exists, then re-CRLF.
+    // NOTE: the buffer is saved verbatim (raw MML, partial headers)
+    // because a draft is unfinished by nature. IMAP APPEND requires CRLF
+    // and edtui emits bare \n, so collapse to \n first to avoid doubling
+    // an existing \r\n.
     let raw = model
         .compose_content()
         .replace("\r\n", "\n")
@@ -916,6 +916,7 @@ fn do_save_draft(model: &mut Model) {
     }
 }
 
+/// Decodes a raw message into displayable text, plain part before HTML.
 pub fn decode_message_body(raw: &[u8]) -> Result<String> {
     let Some(msg) = MessageParser::default().parse(raw) else {
         bail!("Failed to parse message")

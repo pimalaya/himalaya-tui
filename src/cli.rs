@@ -1,7 +1,8 @@
-//! Clap-driven CLI surface and the bridge into the TUI:
+//! # Parser
+//!
+//! Top-level CLI parser and the bridge into the interface:
 //! [`Cli::try_into_tui_model`] turns the parsed flags and the on-disk
-//! configuration, or the wizard, into a ready-to-run [`Model`], applying
-//! the CLI overrides last.
+//! configuration, or the wizard, into a ready-to-run [`Model`].
 
 use std::{
     env::temp_dir,
@@ -41,9 +42,10 @@ use crate::{
     wizard,
 };
 
-/// RFC 3676 §4.3 signature separator, written before the signature
-/// when neither the account nor the global config names one. Matches
-/// the himalaya CLI's own default.
+/// RFC 3676 section 4.3 signature separator.
+///
+/// Written before the signature when neither the account nor the global
+/// configuration names one, matching the himalaya CLI's own default.
 const DEFAULT_SIGNATURE_DELIM: &str = "-- \n";
 
 #[derive(Parser, Debug)]
@@ -53,31 +55,28 @@ const DEFAULT_SIGNATURE_DELIM: &str = "-- \n";
 #[command(after_help = footer!())]
 #[command(propagate_version = true, infer_subcommands = true)]
 pub struct Cli {
+    /// The command to run; a bare `himalaya-tui` opens the interface.
     #[command(subcommand)]
     pub command: Option<Command>,
-
     /// Email address to configure an account from.
     ///
-    /// Passing one skips the account lookup entirely and runs the
-    /// wizard on this value, which answers its first prompt: it is the
-    /// quickest way to try a server. A server URL and a local folder
-    /// path work here too, the address being what this is reached for.
-    /// The rest of the file (theme, signature, keybindings) still
-    /// applies; `--no-config` drops that too. Omitting it and
-    /// `--account` alike opens the default account.
+    /// Passing one skips the account lookup and runs the wizard on this
+    /// value, answering its first prompt: the quickest way to try a
+    /// server. A server URL and a local folder path work here too. The
+    /// rest of the file (theme, signature, keybindings) still applies,
+    /// and `--no-config` drops that too. Omitting both this and
+    /// `--account` opens the default account.
     #[arg(value_name = "EMAIL", conflicts_with = "account")]
     pub seed: Option<String>,
-
     /// Account to open, as named in the configuration file.
     ///
-    /// Defaults to the account flagged `default = true`. A name the
-    /// file cannot answer, because it holds no such account or because
-    /// there is no file at all, is an error rather than a fallback to
-    /// the wizard: use the positional argument for that.
+    /// Defaults to the account flagged `default = true`. A name the file
+    /// cannot answer, holding no such account or being absent
+    /// altogether, is an error rather than a fallback to the wizard: use
+    /// the positional argument for that.
     #[arg(long, short, value_name = "NAME")]
     #[arg(conflicts_with_all = ["seed", "no_config"])]
     pub account: Option<String>,
-
     /// Override the From address used when sending or saving drafts.
     #[arg(long, value_name = "EMAIL")]
     pub from: Option<String>,
@@ -85,33 +84,30 @@ pub struct Cli {
     /// drafts.
     #[arg(long = "from-name", value_name = "NAME")]
     pub from_name: Option<String>,
-
     /// Keybinding flavor applied to the in-app composer.
     ///
-    /// When omitted, falls back to the top-level `keybinds` field in
-    /// the TOML config (if present), otherwise to Vim.
+    /// Falls back to the top-level `keybinds` field of the configuration
+    /// when omitted, then to Vim.
     #[arg(long, value_name = "FLAVOR", value_enum)]
     pub keybinds: Option<Keybinds>,
     /// Override the default configuration file path.
     ///
-    /// The given paths are shell-expanded then canonicalized (if
-    /// applicable). If the first path does not point to a valid file,
-    /// the run falls back to the wizard, which offers to write one
-    /// there. Other paths are merged with the first one, which allows
-    /// you to separate your public config from your private one(s).
-    /// Multiple paths can also be provided by delimiting them with `:`
-    /// (like `$PATH` in a POSIX shell).
+    /// Paths are shell-expanded then canonicalized. Multiple ones may be
+    /// delimited by `:` (like `$PATH` in a POSIX shell) and are merged
+    /// onto the first, which is how a public configuration stays apart
+    /// from private ones. When the first names no valid file, the run
+    /// falls back to the wizard, which offers to write one there.
     #[arg(long = "config", short, global = true, env = "HIMALAYA_CONFIG")]
     #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
     pub config_paths: Vec<PathBuf>,
     /// Skip the configuration file entirely and run the wizard.
     ///
-    /// Useful when a config already exists on disk but you want another
+    /// Useful when a configuration exists on disk but you want another
     /// account for this run. Unlike the positional argument, this drops
-    /// the whole file, theme and signature included, and no welcome is
-    /// printed since the wizard was asked for. The file is not read,
-    /// but `--config` and `HIMALAYA_CONFIG` still name the one the
-    /// wizard offers to file its account in.
+    /// the whole file, theme and signature included, and prints no
+    /// welcome. The file is not read, but `--config` and
+    /// `HIMALAYA_CONFIG` still name the one the wizard offers to file
+    /// its account in.
     #[arg(long = "no-config")]
     pub no_config: bool,
     #[command(flatten)]
@@ -121,6 +117,7 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Builds the interface model this invocation asks for.
     pub fn try_into_tui_model(self) -> Result<Model> {
         let mut spinner = Spinner::start("Loading…");
 
@@ -133,10 +130,10 @@ impl Cli {
             })?,
         )?;
 
-        // NOTE: a run that asked for the wizard skips the account lookup
-        // and goes straight to its prompts. One that falls back to it
-        // says why: `welcome` carries the path a missing file was looked
-        // for at, `wizard_reason` the mistake the user can fix.
+        // NOTE: a run that asked for the wizard goes straight to its
+        // prompts. One that falls back to it says why: `welcome` carries
+        // the path a missing file was looked for at, `wizard_reason` the
+        // mistake the user can fix.
         let asked_for_wizard = self.no_config || self.seed.is_some();
         let mut welcome = None;
         let mut wizard_reason = None;
@@ -262,26 +259,22 @@ impl Cli {
     }
 }
 
-/// Envelopes the first page is fetched with, read off the terminal
-/// before there is a frame to measure.
+/// Envelopes the first page is fetched with, sized off the terminal.
 ///
-/// The first render measures the panel itself and re-pages the list if
-/// this missed, so the estimate only has to spare the session a second
-/// listing: the main area is the terminal without its header and status
-/// lines, and the panel fills it. A terminal too small to hold a row,
-/// or one whose size cannot be read at all, still asks for one.
+/// There is no frame to measure yet, but the first render re-pages the
+/// list when this missed, so the estimate only spares the session a
+/// second listing. The main area is the terminal without its header and
+/// status lines, and one too small to hold a row still asks for one.
 fn startup_page_size() -> usize {
     let rows = terminal::size().map(|(_, rows)| rows).unwrap_or_default();
 
     view::envelope_capacity(rows.saturating_sub(2)).max(1)
 }
 
-/// Assembles the signature block the composer appends: the separator,
-/// then the signature itself. Empty when the account declares no
-/// signature, so that nothing is appended at all.
+/// Assembles the block the composer appends: separator, then signature.
 ///
-/// mml writes what it is given verbatim, and the himalaya CLI writes
-/// the same two pieces around its own body, so the separator is
+/// Empty when the account declares no signature, so nothing is appended
+/// at all. mml writes what it is given verbatim, so the separator is
 /// resolved here rather than expected inside the configured value: one
 /// file, one meaning, whichever binary composes.
 fn signature_block(signature: String, delim: Option<String>) -> String {
@@ -294,15 +287,13 @@ fn signature_block(signature: String, delim: Option<String>) -> String {
     format!("{delim}{}", signature.trim_end_matches('\n'))
 }
 
-/// Runs the interactive setup wizard, returning the account to open
-/// under the name it would be filed as.
+/// Runs the setup wizard, returning the account to open under the name
+/// it would be filed as.
 ///
-/// `welcome` is set when no configuration file was found at all, the
-/// one case the wizard has to introduce itself in: it frames the
-/// binary, names the path, and offers to generate an account. Declining
-/// leaves the run with nothing to open, so it stops there rather than
-/// opening an interface onto no mailbox. A run that asked for the
-/// wizard, with `--no-config` or with an address, skips both.
+/// `welcome` is set only when no configuration file was found, the one
+/// case the wizard introduces itself in. Declining leaves the run with
+/// nothing to open, so it stops there rather than opening onto no
+/// mailbox. A run that asked for the wizard skips both.
 fn run_wizard(
     welcome: Option<&Path>,
     seed: Option<&str>,
@@ -326,21 +317,23 @@ fn run_wizard(
     wizard::configure::run(seed, config_paths)
 }
 
-/// Auxiliary subcommands. When none is given, the binary launches the
-/// TUI as usual.
+/// Auxiliary subcommands, the interface running when none is given.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Generate shell completion scripts.
-    Completions(CompletionCommand),
+    #[command(alias = "completions")]
+    Completion(CompletionCommand),
     /// Generate man pages.
-    Manuals(ManualCommand),
+    #[command(alias = "manuals")]
+    Manual(ManualCommand),
 }
 
 impl Command {
+    /// Runs the subcommand and prints its output.
     pub fn execute(self, printer: &mut impl Printer) -> Result<()> {
         match self {
-            Self::Completions(cmd) => cmd.execute(printer, Cli::command()),
-            Self::Manuals(cmd) => cmd.execute(printer, Cli::command()),
+            Self::Completion(cmd) => cmd.execute(printer, Cli::command()),
+            Self::Manual(cmd) => cmd.execute(printer, Cli::command()),
         }
     }
 }
@@ -367,8 +360,8 @@ mod tests {
     #[test]
     fn no_signature_means_no_block_at_all() {
         assert_eq!(signature_block(String::new(), None), "");
-        // A delimiter alone is not a signature: mml would append a
-        // bare `-- ` to every draft.
+        // NOTE: a delimiter alone is not a signature, or mml would
+        // append a bare `-- ` to every draft.
         assert_eq!(
             signature_block("  \n".to_string(), Some("-- \n".to_string())),
             "",

@@ -1,11 +1,12 @@
-//! Maildir adapter for the shared cross-protocol client.
+//! # Maildir backend
 //!
-//! Thin glue over [`MaildirClient`], which wraps io_maildir's
-//! high-level client (`list_maildirs`, `list_entries`, `read_entries`,
-//! `add_flags`/`remove_flags`/`set_flags`, `get`, `store`, `copy`,
-//! `move`). Each method takes and returns the shared [`crate::email`]
-//! types; the conversion is lifted from the retired io-email Maildir
-//! drivers.
+//! Maildir adapter for the shared cross-protocol client: thin glue over
+//! [`MaildirClient`], whose io_maildir client already walks the on-disk
+//! entries.
+//!
+//! Each method takes and returns the shared [`crate::email`] types, so
+//! the only real work is converting between those and io_maildir's
+//! entries and flags.
 
 use std::{cmp::Reverse, path::Path};
 
@@ -29,15 +30,16 @@ use crate::{
 };
 
 impl MaildirClient {
-    /// A filesystem backend is always live, so the health check is a
-    /// no-op: there is no session to open and no server to reach.
+    /// Checks liveness, a no-op: a filesystem backend has no session to
+    /// open and no server to reach.
     pub fn ping(&mut self) -> Result<()> {
         Ok(())
     }
 
     /// Lists every Maildir under the configured root, sorted by name.
-    /// `with_counts` is ignored (Maildir does not surface counts
-    /// cheaply).
+    ///
+    /// `with_counts` is ignored: Maildir surfaces no cheap count, they
+    /// would cost a full directory walk per mailbox.
     pub fn list_mailboxes(&self, _with_counts: bool) -> Result<Vec<Mailbox>> {
         let mut mailboxes: Vec<Mailbox> = self
             .list_maildirs()?
@@ -48,9 +50,9 @@ impl MaildirClient {
         Ok(mailboxes)
     }
 
-    /// Lists envelopes from `mailbox`, sorted by `Date:` descending
-    /// then paginated. `with_attachment` is always honoured (the body
-    /// is parsed regardless).
+    /// Lists envelopes from `mailbox`, sorted by `Date:` descending then
+    /// paginated. `with_attachment` is always honoured, the body being
+    /// parsed either way.
     pub fn list_envelopes(
         &self,
         mailbox: &str,
@@ -66,8 +68,7 @@ impl MaildirClient {
         envelopes.sort_by_key(|envelope| Reverse(envelope.date));
 
         // NOTE: the whole mailbox is read to answer one page, so the
-        // count is exact and costs nothing more than the read already
-        // paid for.
+        // count is exact and costs nothing the read has not paid for.
         let total = envelopes.len().try_into().unwrap_or(u32::MAX);
 
         Ok(EnvelopeList {
@@ -76,7 +77,7 @@ impl MaildirClient {
         })
     }
 
-    /// Adds, sets, or removes `flags` on a Maildir id set.
+    /// Adds or removes `flags` on a Maildir id set.
     pub fn store_flags(
         &self,
         mailbox: &str,
@@ -138,8 +139,8 @@ impl MaildirClient {
     }
 }
 
-/// Converts one [`Maildir`] into the shared [`Mailbox`] shape: `id` is
-/// the on-disk path, `name` is the last path segment.
+/// Converts one [`Maildir`] into the shared [`Mailbox`] shape, `id`
+/// being the on-disk path and `name` its last segment.
 fn mailbox_from(maildir: Maildir) -> Mailbox {
     Mailbox {
         id: maildir.path().to_string(),
@@ -200,7 +201,7 @@ fn envelope_from_entry(entry: &MaildirFullEntry) -> Envelope {
     }
 }
 
-/// mail-parser address group to a shared [`Address`] list.
+/// Converts a mail-parser address group into shared [`Address`]es.
 fn addresses_from(addrs: &MailParserAddress<'_>) -> Vec<Address> {
     addrs
         .clone()
@@ -217,8 +218,8 @@ fn addresses_from(addrs: &MailParserAddress<'_>) -> Vec<Address> {
         .collect()
 }
 
-/// Maps a shared [`Flag`] to a [`MaildirFlag`]; non-IANA keywords go
-/// through [`MaildirFlag::Keyword`] for the dovecot-keywords sidecar.
+/// Maps a shared [`Flag`] to a [`MaildirFlag`], a keyword with no
+/// letter going through the dovecot-keywords sidecar.
 fn flag_to_maildir(flag: &Flag) -> MaildirFlag {
     match flag.iana() {
         Some(IanaFlag::Seen) => MaildirFlag::Seen,
@@ -231,13 +232,13 @@ fn flag_to_maildir(flag: &Flag) -> MaildirFlag {
     }
 }
 
-/// Shared flag slice to [`MaildirFlags`].
+/// Converts a shared flag slice into [`MaildirFlags`].
 fn flags_to_maildir(flags: &[Flag]) -> MaildirFlags {
     flags.iter().map(flag_to_maildir).collect()
 }
 
-/// Maps a [`MaildirFlag`] back to a shared [`Flag`]; a dovecot or
-/// header keyword comes back as the raw flag it was stored under.
+/// Maps a [`MaildirFlag`] back to a shared [`Flag`], a dovecot or
+/// header keyword keeping the raw spelling it was stored under.
 fn flag_from_maildir(flag: &MaildirFlag) -> Flag {
     match flag {
         MaildirFlag::Seen => Flag::from_iana(IanaFlag::Seen),
@@ -250,8 +251,8 @@ fn flag_from_maildir(flag: &MaildirFlag) -> Flag {
     }
 }
 
-/// 1-indexed in-memory pagination; `page_size = None` returns the full
-/// slice; size 0 or a page past the end returns empty.
+/// 1-indexed in-memory pagination: a `None` page size returns the whole
+/// slice, a zero size or a page past the end returns nothing.
 fn paginate<T>(items: Vec<T>, page: Option<u32>, page_size: Option<u32>) -> Vec<T> {
     let Some(size) = page_size else {
         return items;

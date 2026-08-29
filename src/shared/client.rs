@@ -1,12 +1,12 @@
-//! Cross-protocol [`EmailClient`] backing the interface.
+//! # Client
 //!
-//! Mirrors the himalaya CLI: a single storage backend (the first
-//! configured one, local before network) held in a [`BackendClient`]
-//! enum, plus an optional SMTP transport for accounts whose storage
-//! backend cannot send (IMAP, Maildir). Each method matches the
-//! active backend and calls its adapter (the per-protocol
-//! `<proto>/backend.rs`), which takes and returns the shared
-//! [`crate::email`] types.
+//! The cross-protocol [`EmailClient`] backing the interface: one storage
+//! backend, plus an optional SMTP transport for accounts whose backend
+//! cannot send (IMAP, Maildir).
+//!
+//! Mirrors the himalaya CLI: each method matches the active backend and
+//! forwards to its adapter, the protocol module's backend submodule, which
+//! takes and returns the shared [`crate::email`] types.
 
 #[cfg(feature = "smtp")]
 use std::mem;
@@ -37,8 +37,7 @@ pub struct EmailClient {
     smtp: SmtpTransport,
 }
 
-/// The SMTP transport slot, connected lazily on the first send so that
-/// a reading session never opens an SMTP connection.
+/// The SMTP transport slot, connected lazily on the first send.
 #[cfg(feature = "smtp")]
 enum SmtpTransport {
     /// No SMTP configured for this account.
@@ -49,8 +48,7 @@ enum SmtpTransport {
     Ready(SmtpClient),
 }
 
-/// The active storage backend: exactly one of the compiled-in
-/// per-protocol clients.
+/// The active storage backend, one of the compiled-in clients.
 enum BackendClient {
     #[cfg(feature = "imap")]
     Imap(Box<ImapClient>),
@@ -61,16 +59,17 @@ enum BackendClient {
 }
 
 impl EmailClient {
-    /// Opens the connections for the account: the first configured
-    /// storage backend (local before network), plus an SMTP transport
-    /// when one is configured. Bails when no storage backend is usable.
+    /// Opens the account's connections, bailing when no storage backend
+    /// is usable.
+    ///
+    /// The storage backend is the first configured one, local before
+    /// network; an SMTP transport joins it when the account declares one.
     pub fn new(#[allow(unused_mut)] mut account_config: AccountConfig) -> Result<Self> {
         let storage = select_storage(&mut account_config)?;
 
-        // NOTE: kept unconnected here, so a session that only reads
-        // opens no SMTP connection (it also lets a single-session proxy
-        // such as sirup serve the storage backend without a second
-        // client).
+        // NOTE: staying unconnected lets a read-only session open no SMTP
+        // connection, and a single-session proxy such as sirup serve the
+        // storage backend without a second client.
         #[cfg(feature = "smtp")]
         let smtp = match account_config.smtp.take() {
             Some(config) => SmtpTransport::Pending(Box::new(config)),
@@ -112,8 +111,7 @@ impl EmailClient {
         }
     }
 
-    /// Lists one page of envelopes from `mailbox`, with the total the
-    /// backend reported for it.
+    /// Lists one page of envelopes from `mailbox`, with its total.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
@@ -155,7 +153,7 @@ impl EmailClient {
         }
     }
 
-    /// Adds, sets, or removes `flags` on a message id set in `mailbox`.
+    /// Adds or removes `flags` on a message id set in `mailbox`.
     pub fn store_flags(
         &mut self,
         mailbox: &str,
@@ -176,7 +174,7 @@ impl EmailClient {
         }
     }
 
-    /// Adds `raw` to `mailbox` with `flags`. Returns the created id.
+    /// Adds `raw` to `mailbox` with `flags`, returning the created id.
     pub fn add_message(&mut self, mailbox: &str, flags: &[Flag], raw: Vec<u8>) -> Result<String> {
         let mailbox = self.resolve_mailbox_id(mailbox)?;
         let mailbox = mailbox.as_str();
@@ -225,9 +223,8 @@ impl EmailClient {
         }
     }
 
-    /// Sends `raw`: through the storage backend when it can send itself
-    /// (JMAP), otherwise through the SMTP transport, connecting it on
-    /// this first use.
+    /// Sends `raw` through the storage backend when it can send (JMAP),
+    /// otherwise over the SMTP transport.
     #[cfg_attr(not(any(feature = "jmap", feature = "smtp")), allow(unused_variables))]
     pub fn send_message(&mut self, raw: Vec<u8>) -> Result<()> {
         match &mut self.storage {
@@ -244,13 +241,11 @@ impl EmailClient {
         bail!("No send-capable backend (JMAP) or SMTP is configured for this account")
     }
 
-    /// Maps the interface's human mailbox name onto the backend-native
-    /// id the operation methods expect. Identity for every backend whose
-    /// name already is its id (IMAP, Maildir); JMAP resolves the
-    /// opaque mailbox id via a cached `Mailbox/get`. Applied by the
-    /// mailbox-addressing methods above before they dispatch, so each
-    /// per-protocol adapter only ever receives ids. Idempotent: an
-    /// already-resolved id passes through unchanged.
+    /// Maps a human mailbox name onto the backend-native id, idempotently.
+    ///
+    /// Identity wherever the name already is the id (IMAP, Maildir), a
+    /// cached `Mailbox/get` on JMAP. The methods above apply it before
+    /// dispatching, so an adapter only ever receives ids.
     pub fn resolve_mailbox_id(&mut self, mailbox: &str) -> Result<String> {
         match self.storage_mut()? {
             #[cfg(feature = "jmap")]
@@ -260,8 +255,7 @@ impl EmailClient {
         }
     }
 
-    /// The SMTP transport, connected on this first use. [`None`] when
-    /// the account configures no `[smtp]` block.
+    /// The SMTP transport, connected on this first use, [`None`] if absent.
     #[cfg(feature = "smtp")]
     fn smtp_mut(&mut self) -> Result<Option<&mut SmtpClient>> {
         if let SmtpTransport::Pending(_) = &self.smtp {
@@ -286,8 +280,9 @@ impl EmailClient {
     }
 }
 
-/// Picks the storage backend for the account: the first configured one,
-/// local before network to match the retired io-email dispatcher's read
+/// Picks the account's storage backend, the first configured one.
+///
+/// Local before network, matching the retired io-email dispatcher's read
 /// priority.
 #[cfg_attr(
     not(any(feature = "maildir", feature = "jmap", feature = "imap")),

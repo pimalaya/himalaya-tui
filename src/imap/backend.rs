@@ -1,11 +1,12 @@
-//! IMAP adapter for the shared cross-protocol client.
+//! # IMAP backend
 //!
-//! Thin glue over [`ImapClient`], which already wraps io_imap's
-//! high-level session (`select`, `fetch`, `store`, `copy`, `move`,
-//! `append`, `list`, `status`). Each method takes and returns the TUI's
-//! shared [`crate::email`] types; the only real work is converting
-//! between those and io_imap's wire types, adapted from the retired
-//! io-email IMAP drivers.
+//! IMAP adapter for the shared cross-protocol client: thin glue over
+//! [`ImapClient`], whose io_imap session already speaks the wire
+//! commands.
+//!
+//! Each method takes and returns the shared [`crate::email`] types, so
+//! the only real work is converting between those and io_imap's wire
+//! types.
 
 use std::{collections::BTreeSet, num::NonZeroU32, str::from_utf8};
 
@@ -45,8 +46,8 @@ use crate::{
 };
 
 impl ImapClient {
-    /// Lists every selectable mailbox. With `with_counts`, follows each
-    /// row with a STATUS to populate totals and unread counts.
+    /// Lists every selectable mailbox, adding a STATUS round-trip per
+    /// row when `with_counts` is set.
     pub fn list_mailboxes(&mut self, with_counts: bool) -> Result<Vec<Mailbox>> {
         let reference: ImapMailbox<'static> = ""
             .try_into()
@@ -77,12 +78,12 @@ impl ImapClient {
         Ok(mailboxes)
     }
 
-    /// Lists envelopes from `mailbox`, most recent first. `page = None`
-    /// and `page_size = None` fetch the whole mailbox.
+    /// Lists envelopes from `mailbox`, most recent first, a `None` page
+    /// or page size fetching the whole mailbox.
     ///
-    /// The total is the `EXISTS` the SELECT answered, which is also what
-    /// sizes the window: the mailbox says how many messages it holds
-    /// before a single one is fetched.
+    /// The total is the `EXISTS` the SELECT answered, which also sizes
+    /// the window: the mailbox says how many messages it holds before a
+    /// single one is fetched.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
@@ -120,7 +121,7 @@ impl ImapClient {
         Ok(EnvelopeList { envelopes, total })
     }
 
-    /// Adds, sets, or removes `flags` on a UID set in `mailbox`.
+    /// Adds or removes `flags` on a UID set in `mailbox`.
     pub fn store_flags(
         &mut self,
         mailbox: &str,
@@ -147,8 +148,8 @@ impl ImapClient {
         Ok(())
     }
 
-    /// Fetches one message's raw RFC 5322 bytes without flipping
-    /// `\Seen` (BODY.PEEK[]).
+    /// Fetches one message's raw RFC 5322 bytes with `BODY.PEEK[]`, so
+    /// reading it does not set `\Seen`.
     pub fn get_message(&mut self, mailbox: &str, id: &str) -> Result<Vec<u8>> {
         let mbox = parse_mailbox(mailbox)?;
         let sequence_set = parse_uids(&[id])?;
@@ -179,8 +180,8 @@ impl ImapClient {
             .ok_or_else(|| anyhow!("FETCH returned no body for the requested message"))
     }
 
-    /// Appends `raw` to `mailbox` with `flags`, returning the appended
-    /// UID (UIDPLUS APPENDUID, else a UID SEARCH on Message-ID).
+    /// Appends `raw` to `mailbox` with `flags`, returning its UID from
+    /// the UIDPLUS `APPENDUID`, else from a UID SEARCH on Message-ID.
     pub fn add_message(&mut self, mailbox: &str, flags: &[Flag], raw: Vec<u8>) -> Result<String> {
         let mbox = parse_mailbox(mailbox)?;
         let imap_flags: Vec<ImapFlag<'static>> = flags.iter().map(flag_from).collect();
@@ -199,8 +200,6 @@ impl ImapClient {
             return Ok(uid.to_string());
         }
 
-        // No UIDPLUS: recover the UID via SELECT + UID SEARCH on the
-        // message's own Message-ID (needs one on the message).
         let message_id = MessageParser::default()
             .parse_headers(&raw)
             .and_then(|parsed| parsed.message_id().map(str::to_string))
@@ -258,8 +257,8 @@ type ListRow = (
     Vec<FlagNameAttribute<'static>>,
 );
 
-/// Drops `\Noselect` containers (RFC 3501 §6.3.8): they cannot hold
-/// messages and would error out on any later shared-API op.
+/// Drops `\Noselect` containers (RFC 3501 §6.3.8): they hold no message
+/// and would error out on any later shared-API operation.
 fn is_selectable(row: &ListRow) -> bool {
     !row.2.contains(&FlagNameAttribute::Noselect)
 }
@@ -436,9 +435,11 @@ fn body_structure_has_attachment(structure: &BodyStructure<'_>) -> bool {
     }
 }
 
-/// Maps a shared [`Flag`] to its IMAP wire counterpart. IANA flags
-/// become the matching system flag; custom keywords pass through as
-/// Keyword atoms, with a sanitised fallback for non-atom-safe input.
+/// Maps a shared [`Flag`] to its IMAP wire counterpart.
+///
+/// IANA flags become the matching system flag, custom keywords pass
+/// through as keyword atoms, with a sanitised fallback for input that is
+/// not atom-safe.
 fn flag_from(flag: &Flag) -> ImapFlag<'static> {
     match flag.iana() {
         Some(IanaFlag::Seen) => ImapFlag::Seen,
@@ -510,19 +511,16 @@ fn parse_rfc2822_date(raw: &str) -> Option<DateTime<FixedOffset>> {
         return None;
     }
 
-    // NOTE: chrono validates the optional leading day-of-week against
-    // the date and rejects the whole timestamp when they disagree (a
-    // surprising number of senders get the weekday wrong). The weekday
-    // is redundant, so on failure retry without it.
+    // NOTE: chrono rejects the whole timestamp when the optional
+    // day-of-week disagrees with the date, and a surprising number of
+    // senders get it wrong. The weekday is redundant, so retry without.
     DateTime::parse_from_rfc2822(trimmed)
         .or_else(|_| DateTime::parse_from_rfc2822(strip_weekday(trimmed)))
         .ok()
 }
 
-/// Drops a leading `Dow, ` day-of-week token (for instance `Thu, `)
-/// from an RFC 2822 date, leaving the unambiguous `DD Mon YYYY …`
-/// remainder that chrono parses without a weekday check. Returns the
-/// input untouched when it has no such prefix.
+/// Drops the leading day-of-week token of an RFC 2822 date, leaving the
+/// `DD Mon YYYY …` remainder chrono parses without a weekday check.
 fn strip_weekday(date: &str) -> &str {
     match date.split_once(", ") {
         Some((dow, rest)) if dow.len() == 3 && dow.bytes().all(|b| b.is_ascii_alphabetic()) => rest,
@@ -540,8 +538,8 @@ fn bytes_to_string(bytes: &[u8]) -> String {
     })
 }
 
-/// Decodes RFC 2047 MIME-encoded words from IMAP ENVELOPE strings;
-/// falls back to [`bytes_to_string`] on malformed input.
+/// Decodes RFC 2047 encoded words from IMAP ENVELOPE strings, falling
+/// back to [`bytes_to_string`] on malformed input.
 fn decode_mime_bytes(bytes: &[u8]) -> String {
     let decoder = Decoder::new().too_long_encoded_word_strategy(RecoverStrategy::Decode);
     decoder
@@ -553,25 +551,22 @@ fn decode_mime_bytes(bytes: &[u8]) -> String {
 mod tests {
     use super::compute_window;
 
-    /// Page 1 is the newest window and each further page steps back by
-    /// one page size, which is what makes a mailbox larger than a page
-    /// reachable at all: the window has to move, not just the count of
-    /// what it returned.
+    /// Page 1 is the newest window, each further page steps one size
+    /// back and the oldest one stops short at the first message. Only a
+    /// window that moves makes a mailbox larger than a page reachable.
     #[test]
     fn each_page_steps_one_window_back() {
         let page = |n| compute_window(120, Some(n), Some(50));
 
         assert_eq!(page(1).as_deref(), Some("71:120"));
         assert_eq!(page(2).as_deref(), Some("21:70"));
-        // The oldest page is short: it stops at the first message
-        // rather than running below it.
         assert_eq!(page(3).as_deref(), Some("1:20"));
         assert_eq!(page(4), None, "nothing is left to page into");
     }
 
-    /// A mailbox holding exactly one page has exactly one page: asking
-    /// for the second must come back empty rather than repeat the
-    /// first, which is what the model counts on to stop paging.
+    /// A mailbox holding exactly one page has exactly one page: the
+    /// second comes back empty rather than repeating the first, which
+    /// is what the model counts on to stop paging.
     #[test]
     fn an_exactly_full_page_is_the_only_one() {
         assert_eq!(

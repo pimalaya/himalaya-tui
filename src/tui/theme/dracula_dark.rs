@@ -1,7 +1,7 @@
-//! Dracula 24-bit RGB palette (<https://draculatheme.com/contribute>).
-//! bg=#282a36, current-line=#44475a, fg=#f8f8f2, comment=#6272a4,
-//! cyan=#8be9fd, green=#50fa7b, orange=#ffb86c, pink=#ff79c6,
-//! purple=#bd93f9, red=#ff5555, yellow=#f1fa8c
+//! # Dracula Dark theme
+//!
+//! Dark theme built from the 24-bit RGB Dracula palette, as published
+//! at <https://draculatheme.com/contribute>.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -15,6 +15,7 @@ const PINK: Color = Color::Rgb(0xff, 0x79, 0xc6);
 const PURPLE: Color = Color::Rgb(0xbd, 0x93, 0xf9);
 const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
 
+/// Theme built from the Dracula palette.
 pub const THEME: Theme = Theme {
     header: Style::new().bg(PURPLE).fg(FG).add_modifier(Modifier::BOLD),
     status_bar: Style::new().bg(CURRENT_LINE).fg(FG),

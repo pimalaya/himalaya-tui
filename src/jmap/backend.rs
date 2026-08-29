@@ -1,11 +1,10 @@
-//! JMAP adapter for the shared cross-protocol client.
+//! # JMAP backend
 //!
-//! Thin glue over [`JmapClient`], which wraps io_jmap's high-level
-//! client (`mailbox_get`, `email_query`, `email_get`, `email_set`,
-//! `email_import`, `email_submission_set`, `blob_upload`,
-//! `blob_download`). The shared `mailbox` argument is the JMAP mailbox
-//! id directly (the interface resolves the alias). The conversion is
-//! lifted from the retired io-email JMAP drivers.
+//! JMAP adapter for the shared cross-protocol client: thin glue over
+//! [`JmapClient`], which wraps io_jmap's high-level client.
+//!
+//! The shared `mailbox` argument is the JMAP mailbox id directly, the
+//! interface having already resolved the alias.
 
 use std::collections::BTreeMap;
 
@@ -40,8 +39,10 @@ use crate::{
 };
 
 impl JmapClient {
-    /// Lists every mailbox in the primary mail account. JMAP returns
-    /// counts inline, surfaced only when `with_counts` is set.
+    /// Lists every mailbox in the primary mail account.
+    ///
+    /// Counts come inline with the JMAP response, surfaced only when
+    /// `with_counts` is set.
     pub fn list_mailboxes(&mut self, with_counts: bool) -> Result<Vec<Mailbox>> {
         let output = self.mailbox_get(JmapMailboxGetOptions {
             ids: None,
@@ -55,12 +56,11 @@ impl JmapClient {
             .collect())
     }
 
-    /// Lists envelopes from `mailbox` (a JMAP mailbox id), batching
-    /// `Email/query` + `Email/get` in one round-trip.
+    /// Lists envelopes from `mailbox` (a JMAP mailbox id).
     ///
-    /// The total is the `total` the query answered, RFC 8621 §5.5 making
-    /// it optional even under `calculateTotal`: a server that withholds
-    /// it leaves the page length as the only count available.
+    /// `Email/query` and `Email/get` are batched in one round-trip. The
+    /// total is whatever the query answered: RFC 8621 section 5.5 makes
+    /// it optional even under `calculateTotal`, leaving the page length.
     pub fn list_envelopes(
         &mut self,
         mailbox: &str,
@@ -92,8 +92,9 @@ impl JmapClient {
         Ok(EnvelopeList { envelopes, total })
     }
 
-    /// Adds, sets, or removes `flags` (JMAP keywords) on an email id
-    /// set. `mailbox` is unused: JMAP keywords are global per email.
+    /// Adds or removes `flags` (JMAP keywords) on an email id set.
+    ///
+    /// `mailbox` is unused: JMAP keywords are global per email.
     pub fn store_flags(
         &mut self,
         _mailbox: &str,
@@ -122,8 +123,9 @@ impl JmapClient {
         bail_on_not_updated(output.not_updated)
     }
 
-    /// Fetches one message's raw RFC 5322 bytes: `Email/get` for the
-    /// blob id, then `Blob/download`.
+    /// Fetches one message's raw RFC 5322 bytes.
+    ///
+    /// `Email/get` resolves the blob id, then `Blob/download` fetches it.
     pub fn get_message(&mut self, _mailbox: &str, id: &str) -> Result<Vec<u8>> {
         let output = self.email_get(
             vec![id.to_string()],
@@ -159,8 +161,7 @@ impl JmapClient {
         self.download_blob(&url)
     }
 
-    /// Uploads `raw` as a blob then imports it into `mailbox` with the
-    /// requested keywords. Returns the created email id.
+    /// Uploads `raw` as a blob, imports it into `mailbox`, returns its id.
     pub fn add_message(&mut self, mailbox: &str, flags: &[Flag], raw: Vec<u8>) -> Result<String> {
         let blob_id = self.upload(raw)?;
 
@@ -194,7 +195,8 @@ impl JmapClient {
     }
 
     /// Copies an email id set into `to` by adding `to`'s mailbox id.
-    /// `from` is unused (existing `mailboxIds` carry the source).
+    ///
+    /// `from` is unused: the existing `mailboxIds` carry the source.
     pub fn copy_messages(&mut self, _from: &str, to: &str, ids: &[&str]) -> Result<()> {
         let mut args = JmapEmailSetArgs::default();
         for id in ids {
@@ -217,13 +219,11 @@ impl JmapClient {
         bail_on_not_updated(output.not_updated)
     }
 
-    /// Queues `raw` for delivery: upload, import into drafts as
-    /// `$draft`, then `EmailSubmission/set` under the sending identity.
+    /// Queues `raw` for delivery through `EmailSubmission/set`.
     ///
-    /// Both ids come from the `[jmap]` config block when set, and are
-    /// otherwise resolved from the live JMAP session at send time (see
-    /// [`JmapClient::resolve_identity_id`] and
-    /// [`JmapClient::resolve_drafts_mailbox_id`]).
+    /// The message is uploaded and imported into drafts as `$draft`
+    /// first. Identity and drafts ids come from the `[jmap]` config
+    /// block when set, from the live session at send time otherwise.
     pub fn send_message(&mut self, raw: Vec<u8>) -> Result<()> {
         let identity_id = self.resolve_identity_id()?;
         let drafts_id = self.resolve_drafts_mailbox_id()?;
@@ -287,11 +287,10 @@ impl JmapClient {
         Ok(self.blob_upload(&url, "message/rfc822", raw)?.blob_id)
     }
 
-    /// Resolves the sending identity, preferring the configured
-    /// `identity_id`.
+    /// Resolves the sending identity, configured `identity_id` first.
     ///
-    /// Without one, the first identity returned by `Identity/get` (all
-    /// ids) is used. Bails when the account exposes none.
+    /// Without one, the first identity `Identity/get` returns is used.
+    /// Bails when the account exposes none.
     fn resolve_identity_id(&mut self) -> Result<String> {
         if let Some(id) = self.identity_id() {
             return Ok(id.to_string());
@@ -307,8 +306,7 @@ impl JmapClient {
             .ok_or_else(|| anyhow!("JMAP account exposes no sending identity"))
     }
 
-    /// Resolves the drafts mailbox id, preferring the configured
-    /// `drafts_mailbox_id`.
+    /// Resolves the drafts mailbox, configured `drafts_mailbox_id` first.
     ///
     /// Without one, the mailbox whose role is `drafts` (RFC 8621
     /// section 2.1) is used. Bails when the account exposes none.
@@ -331,8 +329,7 @@ impl JmapClient {
     }
 }
 
-/// Fails with the offending ids when an `Email/set` left some emails
-/// un-updated.
+/// Fails with the offending ids when `Email/set` left emails un-updated.
 fn bail_on_not_updated<E>(not_updated: BTreeMap<String, E>) -> Result<()> {
     if not_updated.is_empty() {
         return Ok(());
@@ -361,7 +358,7 @@ fn mailbox_from(mailbox: JmapMailbox, with_counts: bool) -> Mailbox {
     }
 }
 
-/// Maps a shared [`Flag`] to its JMAP keyword (RFC 8621 §4.1.1).
+/// Maps a shared [`Flag`] to its JMAP keyword (RFC 8621 section 4.1.1).
 fn keyword_from(flag: &Flag) -> String {
     match flag.iana() {
         Some(IanaFlag::Seen) => "$seen".into(),
@@ -379,8 +376,10 @@ fn keyword_from(flag: &Flag) -> String {
     }
 }
 
-/// `Email/get` properties for an [`Envelope`]; uses `sentAt`
-/// (author-claimed Date:) for cross-backend consistency.
+/// `Email/get` properties for an [`Envelope`].
+///
+/// `sentAt`, the author-claimed Date:, is preferred over the delivery
+/// date for cross-backend consistency.
 fn envelope_properties() -> Vec<JmapEmailProperty> {
     vec![
         JmapEmailProperty::Id,
@@ -430,8 +429,8 @@ fn envelope_from(email: JmapEmail) -> Envelope {
     let date = email.sent_at.as_deref().and_then(parse_rfc3339);
     let size = email.size.unwrap_or(0);
     let has_attachment = email.has_attachment;
-    // NOTE: JMAP returns messageId as a list (RFC 5322 allows multiple
-    // header instances); the first non-empty entry is canonical.
+    // NOTE: JMAP returns messageId as a list, RFC 5322 allowing repeated
+    // header instances; the first non-empty entry is canonical.
     let message_id = email
         .message_id
         .and_then(|ids| ids.into_iter().find_map(|s| normalize_message_id(&s)));

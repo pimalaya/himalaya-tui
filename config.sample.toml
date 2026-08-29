@@ -1,5 +1,5 @@
 # ================================================================================
-# `himalaya-tui` configuration file.
+# himalaya-tui configuration file.
 #
 # Loaded from the first valid path among:
 #   - $XDG_CONFIG_HOME/himalaya/config.toml
@@ -10,16 +10,15 @@
 # paths can be passed at once, separated by `:`; the first one is the base and
 # the rest are deep-merged on top of it. `--no-config` skips on-disk config.
 #
-# A run that resolves no account falls back to the wizard, the `himalaya` CLI's
+# A run that resolves no account falls back to the wizard, the himalaya CLI's
 # own: it discovers an account from an email address, then offers to write the
-# `[accounts.<name>]` block here. Declining opens that account for the session
-# alone. Ask for it with `himalaya-tui <EMAIL>` or with `--no-config`.
+# `[accounts.<name>]` block here. Ask for it with `himalaya-tui <EMAIL>` or
+# `--no-config`; declining the offer opens the account for the session alone.
 #
-# The path is shared with the `himalaya` CLI: one TOML file backs both binaries.
-# TUI-only fields (`keybinds`, `theme`) and CLI-only sections (`table`,
-# `envelope`, `message`, `attachment`, `account`) coexist without errors. The
-# identity is read under either spelling, `from`/`from-name` here and
-# `email`/`display-name` in the CLI, and written under the CLI's.
+# One file backs both binaries, so TUI-only fields (`keybinds`, `theme`) and
+# CLI-only sections (`table`, `envelope`, `message`, `attachment`, `account`)
+# coexist. The identity is read under either spelling, `from`/`from-name` or
+# `email`/`display-name`, and written under the CLI's.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -43,10 +42,9 @@
 # Default download directory for attachments. Falls back to `$TMPDIR`.
 #downloads-dir = "~/downloads"
 
-# Composer keybinding flavor: `vim` (default) or `emacs`. The `--keybinds` CLI
-# flag overrides this. The flavor drives both edtui's built-in bindings and
-# the event loop's own intercepts (notably `Ctrl-e`, which collides with
-# Emacs' "move to end of line").
+# Composer keybinding flavor: `vim` (default) or `emacs`, overridden by the
+# `--keybinds` flag. It drives edtui's own bindings and the event loop's
+# intercepts, notably `Ctrl-e`, which collides with Emacs' end of line.
 #keybinds = "vim"
 
 # --------------------------------------------------------------------------------
@@ -155,15 +153,13 @@
 # Use this account when `-a` is not passed.
 default = true
 
-# From address used when sending. The wizard writes it when its prompt was
-# answered with an address.
-# The `--from <EMAIL>` CLI flag overrides this.
-# Also spelled `email`, the key the himalaya CLI writes; both binaries read
-# both, one file backing the two.
+# From address used when sending, overridden by the `--from <EMAIL>` flag.
+# Also spelled `email`, the key the himalaya CLI writes: both binaries read
+# both spellings, one file backing the two.
 #from = "user@example.com"
 
-# From display name. The `--from-name <NAME>` CLI flag overrides this.
-# Also spelled `display-name`, the key the himalaya CLI writes.
+# From display name, overridden by the `--from-name <NAME>` flag. Also spelled
+# `display-name`, the key the himalaya CLI writes.
 #from-name = "Example User"
 
 # Per-account overrides for the global options above.
@@ -172,8 +168,8 @@ default = true
 #downloads-dir = "~/downloads/example"
 
 # Mailbox aliases mapping a friendly name to a backend-native id, written by
-# the wizard from what the server reported. Read by the `himalaya` CLI, which
-# addresses a mailbox by id; inert here, the TUI resolving a name against the
+# the wizard from what the server reported. Read by the himalaya CLI, which
+# addresses a mailbox by id, and inert here: a name is resolved against the
 # live listing before every dispatch.
 #mailbox.alias.inbox = "INBOX"
 #mailbox.alias.drafts = "Drafts"
@@ -183,11 +179,10 @@ default = true
 # https://www.iana.org/go/rfc9051
 # --------------------------------------------------------------------------------
 
-# IMAP server. Either a bare authority (`host[:port]`, treated as
-# `imaps://<authority>` by default), or a full URL with `imap://` (cleartext,
-# optionally upgraded via STARTTLS), `imaps://` (implicit TLS) or `unix://`
-# (a local pre-authenticated socket proxy such as sirup, over which no SASL
-# is negotiated) scheme. Any other scheme is rejected.
+# IMAP server, a bare authority (`host[:port]`) meaning `imaps://`. A full URL
+# takes `imap://` (cleartext, optionally upgraded via STARTTLS), `imaps://`
+# (implicit TLS) or `unix://` (a pre-authenticated local socket proxy such as
+# sirup, over which no SASL is negotiated). Any other scheme is rejected.
 imap.server = "example.com"
 #imap.server = "imap.example.com:143"
 #imap.server = "imap://example.com:143"
@@ -208,9 +203,8 @@ imap.server = "example.com"
 # Enable STARTTLS (only valid when the server resolves to `imap://`).
 #imap.starttls = false
 
-# ALPN protocol identifiers offered during the TLS handshake (rustls only;
-# native-tls ignores it). Left unset, io-imap own default applies (["imap"]);
-# set to [] to skip ALPN negotiation entirely.
+# ALPN identifiers offered during the TLS handshake, read by rustls alone.
+# Unset applies io-imap's own default (["imap"]), and [] skips the negotiation.
 #imap.alpn = ["imap"]
 #imap.alpn = []
 
@@ -250,9 +244,10 @@ imap.sasl.plain.password.raw = "***"
 #imap.sasl.scram-sha-256.username = "user@example.com"
 #imap.sasl.scram-sha-256.password.raw = "***"
 
-# RFC 4959 SASL-IR. Leave unset to follow the capability; set `false` to wait for
-# the server's continuation request instead of sending credentials inline (needed
-# by Coremail: 126.com, 163.com), or `true` to always send them inline.
+# RFC 4959 SASL-IR, following the advertised capability when unset. `false`
+# waits for the server's continuation request instead of sending credentials
+# inline, which is what Coremail (126.com, 163.com) needs; `true` always
+# inlines them.
 # https://www.rfc-editor.org/rfc/rfc4959.html
 #imap.sasl-ir = false
 
@@ -261,15 +256,15 @@ imap.sasl.plain.password.raw = "***"
 # https://www.rfc-editor.org/rfc/rfc2971.html
 #imap.id.auto = false
 
-# Per-field policy for the auto-ID command. Keys not listed here are NOT sent.
-# `true` substitutes himalaya-tui's canned value for the well-known keys (name,
-# version, vendor, support-url); unknown keys with `true` fall back to NIL with
-# a warning. `false` always sends NIL. An empty map sends `ID NIL`.
+# Per-field policy for the auto-ID command, an empty map sending `ID NIL`.
+# `true` substitutes the canned value for a well-known key (name, version,
+# vendor, support-url) and NIL for any other, `false` always sends NIL. A key
+# absent from this map is not sent at all.
 #imap.id.fields = { name = true, version = true, vendor = true, support-url = true }
 
-# RFC 5256 SORT fallback, read by the himalaya CLI only: the TUI paginates a
+# RFC 5256 SORT fallback, read by the himalaya CLI alone. The TUI paginates a
 # sequence-set window rather than issuing `SORT`, so it accepts the option to
-# keep a shared configuration file loading, and ignores it.
+# keep a shared file loading, then ignores it.
 # https://www.rfc-editor.org/rfc/rfc5256.html
 #imap.sort.fallback = false
 
@@ -289,9 +284,9 @@ imap.sasl.plain.password.raw = "***"
 #jmap.tls.rustls.crypto = "ring"
 #jmap.tls.cert = "/path/to/custom/cert.pem"
 
-# ALPN protocol identifiers offered during the TLS handshake. Left unset,
-# io-jmap own default applies (["http/1.1"], JMAP riding on HTTP/1.1); set to
-# [] to skip ALPN negotiation entirely.
+# ALPN identifiers offered during the TLS handshake. Unset applies io-jmap's
+# own default (["http/1.1"], JMAP riding on HTTP/1.1), and [] skips the
+# negotiation.
 #jmap.alpn = ["http/1.1"]
 #jmap.alpn = []
 
@@ -310,14 +305,13 @@ imap.sasl.plain.password.raw = "***"
 #jmap.auth.basic.password.raw = "***"
 #jmap.auth.basic.password.command = "pass show fastmail"
 
-# Identity to send as. Optional: when omitted, the first identity `Identity/get`
-# reports on the live session is used. Set it to pin a specific one; list them
-# with `himalaya jmap identity get`.
+# Identity to send as, the first one `Identity/get` reports when omitted. Set
+# it to pin a specific one, listing them with `himalaya jmap identity get`.
 #jmap.identity-id = "I0123abc"
 
-# Drafts mailbox id used to stage outgoing messages before submission. Optional:
-# when omitted, the mailbox with the `drafts` role is resolved from the live
-# session. Find it with `himalaya jmap mailbox query --role drafts`.
+# Drafts mailbox id used to stage outgoing messages before submission. Omitted,
+# the mailbox with the `drafts` role is resolved from the live session. Find it
+# with `himalaya jmap mailbox query --role drafts`.
 #jmap.drafts-mailbox-id = "M0123abc"
 
 # --------------------------------------------------------------------------------
@@ -332,14 +326,13 @@ imap.sasl.plain.password.raw = "***"
 # https://www.iana.org/go/rfc5321
 # --------------------------------------------------------------------------------
 
-# SMTP server. Either a bare authority (`host[:port]`, treated as
-# `smtps://<authority>` by default), or a full URL with `smtp://` (cleartext,
-# optionally upgraded via STARTTLS), `smtps://` (implicit TLS) or `unix://`
-# (a local pre-authenticated socket proxy such as sirup, over which no SASL
-# is negotiated) scheme. Any other scheme is rejected.
+# SMTP server, a bare authority (`host[:port]`) meaning `smtps://`. A full URL
+# takes `smtp://` (cleartext, optionally upgraded via STARTTLS), `smtps://`
+# (implicit TLS) or `unix://` (a pre-authenticated local socket proxy such as
+# sirup, over which no SASL is negotiated). Any other scheme is rejected.
 #
-# A storage backend that cannot send on its own (IMAP, Maildir) routes
-# the composer through this block; JMAP sends on its own and ignores it. The
+# A storage backend that cannot send on its own (IMAP, Maildir) routes the
+# composer through this block, JMAP sending on its own and ignoring it. The
 # connection opens on the first send, not at startup.
 smtp.server = "example.com"
 #smtp.server = "smtp.example.com:587"
@@ -361,9 +354,8 @@ smtp.server = "example.com"
 # Enable STARTTLS (only valid when the server resolves to `smtp://`).
 #smtp.starttls = false
 
-# ALPN protocol identifiers offered during the TLS handshake (rustls only;
-# native-tls ignores it). Left unset, io-smtp own default applies (["smtp"]);
-# set to [] to skip ALPN negotiation entirely.
+# ALPN identifiers offered during the TLS handshake, read by rustls alone.
+# Unset applies io-smtp's own default (["smtp"]), and [] skips the negotiation.
 #smtp.alpn = ["smtp"]
 #smtp.alpn = []
 

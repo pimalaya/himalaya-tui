@@ -1,13 +1,13 @@
-//! IMAP + SMTP wizard.
+//! # IMAP + SMTP wizard
 //!
 //! A discovery entry pins the endpoints, so [`configure_discovered`]
-//! picks the SASL mechanism, prompts its credentials and tests the IMAP
-//! connection, then, when discovery also found a submission endpoint,
-//! asks whether SMTP shares them: if so the same credential backs both
-//! sides, otherwise the SASL prompts run again for SMTP (IMAP and SMTP
-//! may advertise different auth), and the SMTP connection is tested last.
-//! The wizard never invents an SMTP host: with no discovered submission
-//! endpoint the account is IMAP-only, and the user adds SMTP by hand.
+//! only picks the SASL mechanism, prompts its credentials, and asks
+//! whether SMTP shares them.
+//!
+//! IMAP and SMTP may advertise different auth, hence the offer of a
+//! distinct credential. The wizard never invents an SMTP host: with no
+//! discovered submission endpoint the account is IMAP-only, and the user
+//! adds SMTP by hand.
 
 use std::collections::HashMap;
 
@@ -35,12 +35,11 @@ const ANONYMOUS: &str = "ANONYMOUS (no credentials)";
 const OAUTHBEARER: &str = "OAUTHBEARER (username + API token)";
 const XOAUTH2: &str = "XOAUTH2 (username + API token)";
 
-/// Configures IMAP + SMTP from a discovered entry: pick the SASL
-/// mechanism and credentials for IMAP, test the connection, then ask
-/// whether SMTP reuses them, configuring a distinct SASL when it does
-/// not, and test SMTP last. Both connections are validated here, so the
-/// caller skips the final account test. Returns the discovered
-/// `mailbox.alias.*` entries (the IMAP inbox) alongside the configs.
+/// Configures IMAP + SMTP from a discovered entry.
+///
+/// Both connections are validated here, so the caller skips the final
+/// account test. The discovered `mailbox.alias.*` entries (the IMAP
+/// inbox) come back alongside the configs.
 pub fn configure_discovered(
     account_name: &str,
     email: &str,
@@ -52,9 +51,8 @@ pub fn configure_discovered(
 
     let login_hint = discovered.login_default(email);
 
-    // Probe the server so only the mechanisms it actually advertises are
-    // offered (LOGIN last); on any probe failure fall back to the full
-    // list keyed on what discovery advertised.
+    // Only the mechanisms the server advertises are offered; a failed
+    // probe falls back to the full list keyed on discovery.
     let probed = probe_imap_mechanisms(
         &endpoint_server(imap),
         imap.security == DiscoverySecurity::Starttls,
@@ -70,13 +68,10 @@ pub fn configure_discovered(
 
     let aliases = mailbox::imap_aliases();
 
-    // The wizard never invents an SMTP host: when discovery found no
-    // submission endpoint, the account stays IMAP-only and the user adds
-    // SMTP by hand. Otherwise configure and test it, reusing the IMAP
-    // credential unless the user opts for a distinct one, IMAP and SMTP
-    // may advertise different auth. SMTP advertises its auth over EHLO,
-    // not the IMAP CAPABILITY probe, so its mechanism list stays keyed on
-    // discovery (probed = None), unlike the IMAP side above.
+    // With no discovered submission endpoint the account stays
+    // IMAP-only, the wizard never inventing an SMTP host. SMTP
+    // advertises its auth over EHLO, not the IMAP CAPABILITY probe, so
+    // its mechanism list stays keyed on discovery (probed = None).
     let smtp = match smtp {
         Some(endpoint) => {
             let smtp_sasl = if prompt::bool("Use the same credentials for SMTP?", true)? {
@@ -94,10 +89,10 @@ pub fn configure_discovered(
     Ok((imap, smtp, aliases))
 }
 
-/// Runs a connection `test` behind a labelled spinner, surfacing a
-/// failure as the wizard's error (like the final account test) so a bad
-/// credential stops here instead of yielding a config that cannot
-/// connect.
+/// Runs a connection `test` behind a labelled spinner.
+///
+/// A failure surfaces as the wizard's error, so a bad credential stops
+/// here instead of yielding a config that cannot connect.
 fn test_connection(label: &str, test: impl FnOnce() -> Result<()>) -> Result<()> {
     let spinner = Spinner::start(format!("Testing {label} connection"));
 
@@ -110,12 +105,11 @@ fn test_connection(label: &str, test: impl FnOnce() -> Result<()>) -> Result<()>
     Ok(())
 }
 
-/// Prompts the SASL mechanism then its credentials. When `probed` is
-/// `Some` (a live IMAP CAPABILITY probe) only those mechanisms are
-/// offered, most preferred first and LOGIN last; otherwise the full list
-/// keyed on `caps` is offered, so a failed probe never leaves the user
-/// stuck. The token mechanisms' OAuth brokers appear only when a token
-/// or OAuth grant was advertised.
+/// Prompts the SASL mechanism, then its credentials.
+///
+/// A live CAPABILITY probe in `probed` restricts the menu to what the
+/// server advertised; otherwise the full list keyed on `caps` is
+/// offered, so a failed probe never leaves the user stuck.
 fn prompt_sasl(
     account_name: &str,
     login_hint: Option<&str>,
@@ -126,9 +120,10 @@ fn prompt_sasl(
     build_sasl(mechanism, account_name, login_hint, caps)
 }
 
-/// Prompts the authentication mechanism: the probed list when the server
-/// advertised one, otherwise the full fallback list. A single candidate
-/// is selected without prompting.
+/// Prompts the authentication mechanism among the probed list, or the
+/// fallback one.
+///
+/// A single candidate is selected without prompting.
 fn prompt_mechanism(caps: AuthCaps, probed: Option<&[SaslMechanism]>) -> Result<SaslMechanism> {
     let mechanisms = match probed {
         Some(mechanisms) if !mechanisms.is_empty() => mechanisms.to_vec(),
@@ -151,6 +146,7 @@ fn prompt_mechanism(caps: AuthCaps, probed: Option<&[SaslMechanism]>) -> Result<
 }
 
 /// Prompts the credentials for `mechanism` and builds its SASL config.
+///
 /// ANONYMOUS carries no login; every other mechanism needs one, plus a
 /// password (basic family) or an API token (OAuth family).
 fn build_sasl(
@@ -227,8 +223,7 @@ fn mechanism_label(mechanism: &SaslMechanism) -> &'static str {
     }
 }
 
-/// The registered SASL name of a mechanism the wizard does not offer,
-/// used to name it in a menu label or an error.
+/// The registered SASL name of a mechanism, for a label or an error.
 fn mechanism_name(mechanism: &SaslMechanism) -> &'static str {
     match mechanism {
         SaslMechanism::CramMd5 => "CRAM-MD5",
@@ -250,10 +245,11 @@ fn mechanism_name(mechanism: &SaslMechanism) -> &'static str {
     }
 }
 
-/// The mechanisms offered when no live probe is available, keyed on what
-/// discovery advertised (every family when nothing was): most preferred
-/// first, LOGIN last, token mechanisms only when a token or OAuth grant
-/// was advertised.
+/// The mechanisms offered when no live probe is available.
+///
+/// Keyed on what discovery advertised, every family when nothing was:
+/// most preferred first, LOGIN last, and the token mechanisms only when
+/// a token or an OAuth grant was advertised.
 fn fallback_mechanisms(caps: AuthCaps) -> Vec<SaslMechanism> {
     let mut mechanisms = Vec::new();
 
@@ -270,10 +266,11 @@ fn fallback_mechanisms(caps: AuthCaps) -> Vec<SaslMechanism> {
     mechanisms
 }
 
-/// Probes the IMAP server for the mechanisms it advertises, returning
+/// Probes the IMAP server for the mechanisms it advertises.
+///
 /// `None` (offer the full list) when the probe fails or advertises
-/// nothing usable. The error is logged, never surfaced: the wizard falls
-/// back rather than stopping.
+/// nothing usable: the error is logged rather than surfaced, the wizard
+/// falling back rather than stopping.
 fn probe_imap_mechanisms(server: &str, starttls: bool) -> Option<Vec<SaslMechanism>> {
     match check::probe_imap_mechanisms(server, starttls) {
         Ok(mechanisms) if !mechanisms.is_empty() => Some(mechanisms),
@@ -285,8 +282,7 @@ fn probe_imap_mechanisms(server: &str, starttls: bool) -> Option<Vec<SaslMechani
     }
 }
 
-/// The `scheme://host:port` string for a discovered endpoint, matching
-/// how [`imap_config`] builds the server URL.
+/// The `scheme://host:port` string [`imap_config`] builds its server on.
 fn endpoint_server(endpoint: &TcpEndpoint) -> String {
     let scheme = if endpoint.security == DiscoverySecurity::Tls {
         "imaps"
@@ -297,6 +293,7 @@ fn endpoint_server(endpoint: &TcpEndpoint) -> String {
     format!("{scheme}://{}:{}", endpoint.host, endpoint.port)
 }
 
+/// The IMAP config for a discovered endpoint and its SASL.
 fn imap_config(endpoint: &TcpEndpoint, sasl: SaslConfig) -> ImapConfig {
     ImapConfig {
         server: endpoint_server(endpoint),
@@ -310,6 +307,7 @@ fn imap_config(endpoint: &TcpEndpoint, sasl: SaslConfig) -> ImapConfig {
     }
 }
 
+/// The SMTP config for a discovered endpoint and its SASL.
 fn smtp_config(endpoint: &TcpEndpoint, sasl: SaslConfig) -> SmtpConfig {
     let scheme = if endpoint.security == DiscoverySecurity::Tls {
         "smtps"

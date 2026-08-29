@@ -1,21 +1,20 @@
-//! TOML configuration model loaded from the same file used by the
-//! [`himalaya`] CLI. Each per-backend block deserializes here; the live
-//! clients that consume it live in the per-protocol modules
-//! (`crate::imap`, `crate::jmap`, …).
+//! # Configuration
 //!
-//! `Config::project_name()` returns `"himalaya"` (not the crate name)
-//! so the default XDG path resolves to `himalaya/config.toml`, allowing
-//! the same file to back both binaries.
+//! The TOML schema, loaded from the same file the himalaya CLI uses.
+//! Each per-backend block deserializes here, while the live clients
+//! consuming it live in the per-protocol modules.
 //!
-//! Every block is modelled unconditionally, so one configuration file
-//! loads whatever backends a build enables. The converters turning a
-//! block into a runtime handle are therefore modelled unconditionally
-//! too, and each carries an `allow(dead_code)` for the builds whose
-//! feature set leaves it without a caller. They gate on no cargo
-//! feature of their own, since the crates they need (io-sasl,
-//! pimalaya-stream, url) are unconditional dependencies.
+//! `Config::project_name()` answers "himalaya" rather than the crate
+//! name, so the default XDG path resolves to himalaya/config.toml and
+//! one file backs both binaries.
 //!
-//! [`himalaya`]: https://github.com/pimalaya/himalaya
+//! Every block is modelled unconditionally, so one file loads whatever
+//! backends a build enables. The converters turning a block into a
+//! runtime handle are unconditional too, each carrying an
+//! `allow(dead_code)` for the feature sets leaving it without a caller.
+//!
+//! They gate on no cargo feature of their own, the crates they need
+//! being unconditional dependencies.
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -39,35 +38,33 @@ use crate::tui::{
     theme::{self, Theme},
 };
 
-/// `skip_serializing_if` predicate skipping a field equal to its type's
-/// default, so a wizard-generated account omits defaulted scalars (the
-/// only serializer is the wizard, see [`crate::wizard`]).
+/// `skip_serializing_if` predicate omitting a field left at its default.
+///
+/// The only serializer is [`crate::wizard`], so a generated account
+/// carries only what the user chose.
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
 }
 
-/// `deny_unknown_fields` is intentionally omitted so the same TOML
-/// file can be shared with the `himalaya` CLI: top-level CLI-only
-/// sections (`table`, `envelope`, `mailbox`, `message`, `attachment`,
-/// `account`) are silently ignored here.
+/// The whole TOML document.
+///
+/// `deny_unknown_fields` is omitted so one file can be shared with the
+/// himalaya CLI: its top-level sections (`table`, `envelope`,
+/// `mailbox`, `message`, `attachment`, `account`) are ignored here.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     #[serde(alias = "from-name")]
     pub display_name: Option<String>,
-    /// Signature appended to a composed draft when an account declares
-    /// none of its own. See [`AccountConfig::signature`].
+    /// Fallback for [`AccountConfig::signature`].
     pub signature: Option<String>,
-    /// Separator written before the signature when an account declares
-    /// none of its own. See [`AccountConfig::signature_delim`].
+    /// Fallback for [`AccountConfig::signature_delim`].
     pub signature_delim: Option<String>,
     pub downloads_dir: Option<PathBuf>,
-    /// Composer keybinding flavor (Vim or Emacs). The CLI `--keybinds`
-    /// flag overrides this; both default to Vim when omitted.
+    /// Composer keybinding flavor, Vim when omitted and overridden by
+    /// the `--keybinds` flag.
     pub keybinds: Option<Keybinds>,
-    /// Color theme: pick a preset (`dracula-dark`, `one-light`,
-    /// `tokyo-night`) and/or override individual fields. Resolved into
-    /// a [`Theme`] at startup.
+    /// Color theme, resolved into a [`Theme`] at startup.
     #[serde(default)]
     pub theme: ThemeConfig,
     pub accounts: HashMap<String, AccountConfig>,
@@ -76,18 +73,17 @@ pub struct Config {
 impl TomlConfig for Config {
     type Account = AccountConfig;
 
-    /// Hard-coded to `"himalaya"` (not `CARGO_PKG_NAME`) so the TUI's
-    /// default XDG path resolves to the same `himalaya/config.toml`
-    /// the CLI uses, allowing one shared configuration file.
+    /// Answers "himalaya" rather than the crate name, so the default
+    /// XDG path resolves to the very file the CLI reads.
     fn project_name() -> &'static str {
         "himalaya"
     }
 
+    /// Takes the named account out of the document, or the default one.
+    ///
     /// Overrides the default implementation, whose bare "Get account
     /// error" leaves the user guessing: a name that does not exist is
     /// usually a typo, so the error lists the ones the file does hold.
-    /// The default-account arm is unchanged, [`crate::cli`] turning its
-    /// [`None`] into the wizard.
     fn take_account(&mut self, name: Option<&str>) -> Result<Option<(String, Self::Account)>> {
         let Some(name) = name.filter(|name| !name.is_empty() && *name != "default") else {
             return Ok(self.take_default_account());
@@ -121,15 +117,14 @@ impl TomlConfig for Config {
     }
 }
 
-/// User-supplied theme configuration: pick a preset and/or override
-/// individual fields. Each override is merged on top of the preset
-/// via [`Style::patch`], so users can change just one attribute
-/// (e.g. only `fg`) and inherit the rest from the preset.
+/// User-supplied theme: a preset, individual overrides, or both.
+///
+/// Each override is merged onto the preset with [`Style::patch`], so
+/// changing one attribute inherits the rest of the preset.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThemeConfig {
-    /// Preset theme name. Each variant maps to one file under
-    /// src/tui/theme/.
+    /// Preset name, one variant per file under src/tui/theme/.
     pub preset: Option<PresetConfig>,
     pub header: Option<StyleConfig>,
     pub status_bar: Option<StyleConfig>,
@@ -147,9 +142,10 @@ pub struct ThemeConfig {
     pub compose_selection: Option<StyleConfig>,
 }
 
-/// Names of presets shipped with the binary. Contributors add a preset
-/// by dropping a new file under src/tui/theme/, declaring it in
-/// src/tui/theme.rs, and adding a variant and a match arm here.
+/// The presets shipped with the binary.
+///
+/// One is added by dropping a file under src/tui/theme/, declaring it
+/// in src/tui/theme.rs, then adding a variant and a match arm here.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PresetConfig {
@@ -160,6 +156,7 @@ pub enum PresetConfig {
 }
 
 impl PresetConfig {
+    /// The theme this preset resolves to.
     pub const fn theme(self) -> Theme {
         match self {
             PresetConfig::Default => theme::default::THEME,
@@ -170,11 +167,8 @@ impl PresetConfig {
     }
 }
 
-/// Config-side mirror of ratatui's [`Style`]. Field names follow the rest of
-/// the config (kebab-case); `mod` is a list of [`ModifierConfig`] variants
-/// (`["bold", "italic"]`).
-///
-/// Example:
+/// Config-side mirror of ratatui's [`Style`], `mod` carrying a list of
+/// [`ModifierConfig`] variants.
 ///
 /// ```toml
 /// [theme.cursor]
@@ -213,8 +207,7 @@ impl From<&StyleConfig> for Style {
     }
 }
 
-/// Kebab-case mirror of ratatui's [`Modifier`] for user config. Each
-/// variant maps 1:1 to a `Modifier::*` flag via [`From`].
+/// Kebab-case mirror of ratatui's [`Modifier`], one variant per flag.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModifierConfig {
@@ -245,9 +238,11 @@ impl From<ModifierConfig> for Modifier {
     }
 }
 
-/// `deny_unknown_fields` is omitted so per-account CLI-only sections
-/// (`table`, `envelope`, `mailbox`, `attachment`) coexist in the same
-/// `[accounts.<name>]` block.
+/// One `[accounts.<name>]` block.
+///
+/// `deny_unknown_fields` is omitted so the CLI-only per-account
+/// sections (`table`, `envelope`, `mailbox`, `attachment`) coexist in
+/// it rather than failing the load.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
@@ -257,31 +252,29 @@ pub struct AccountConfig {
     pub smtp: Option<SmtpConfig>,
     pub jmap: Option<JmapConfig>,
     pub maildir: Option<MaildirConfig>,
-    /// Address this account sends as. Aliased to `email`, the
-    /// spelling the himalaya CLI writes, the two binaries sharing one
-    /// configuration file.
+    /// Address this account sends as.
     ///
-    /// Written back under the CLI spelling: the wizard here saves into
-    /// the file the CLI authors, and one key spelled two ways depending
-    /// on which binary wrote the block helps nobody.
+    /// Read and written under `email`, the CLI spelling, since one key
+    /// spelled two ways depending on which binary wrote the block helps
+    /// nobody.
     #[serde(alias = "email", rename(serialize = "email"))]
     pub from: Option<String>,
-    /// Name that address carries. Aliased to `display-name`, the
-    /// spelling the CLI writes; falls back to the global
-    /// [`Config::display_name`]. Written back under the CLI spelling,
-    /// as [`AccountConfig::from`] is.
+    /// Name that address carries, falling back to
+    /// [`Config::display_name`].
+    ///
+    /// Read and written under `display-name`, the CLI spelling, as
+    /// [`AccountConfig::from`] is.
     #[serde(alias = "display-name", rename(serialize = "display-name"))]
     pub from_name: Option<String>,
-    /// Signature appended to a composed draft, after the body. Falls
-    /// back to the global [`Config::signature`].
+    /// Signature appended after the body, falling back to
+    /// [`Config::signature`].
     ///
-    /// The value is the signature alone: the separator before it is
+    /// The value is the signature alone: the separator is
     /// [`AccountConfig::signature_delim`]'s business, so a signature
     /// written for one binary reads the same in the other.
     pub signature: Option<String>,
-    /// Separator written before the signature, defaulting to the
-    /// RFC 3676 §4.3 `"-- \n"`. Falls back to the global
-    /// [`Config::signature_delim`].
+    /// Separator before the signature, the RFC 3676 section 4.3 `"-- \n"`
+    /// by default, falling back to [`Config::signature_delim`].
     ///
     /// Written verbatim, so a value meant to stand on its own line
     /// carries its own trailing newline.
@@ -289,10 +282,9 @@ pub struct AccountConfig {
     pub downloads_dir: Option<PathBuf>,
     /// Mailbox aliases mapping a friendly name to a backend-native id.
     ///
-    /// Written by the wizard and read by the himalaya CLI, which needs
-    /// them to address a mailbox without hand-editing ids. Inert here:
-    /// the TUI resolves a mailbox name against the live listing before
-    /// every dispatch, so it never has an id to alias.
+    /// Written for the himalaya CLI, which needs them to address a
+    /// mailbox without hand-editing ids. Inert here: a mailbox name is
+    /// resolved against the live listing, so there is no id to alias.
     #[serde(default, skip_serializing_if = "is_default")]
     pub mailbox: MailboxConfig,
 }
@@ -310,15 +302,11 @@ pub struct MailboxConfig {
     pub aliases: HashMap<String, String>,
 }
 
-/// The order the rendered account groups its keys in, most defining
-/// first: what the account is, who it speaks for, then the backend it
-/// reads from, the transport it sends over, and the mailboxes it
-/// names. Matches the himalaya CLI's own table, one file being written
-/// by both wizards.
+/// The order a rendered account groups its keys in, most defining first.
 ///
-/// A key outside this list still renders, after the ones listed, so a
-/// field added to [`AccountConfig`] can never go missing from a
-/// generated document just because nobody updated this table.
+/// Matches the himalaya CLI's own table, one file being written by both
+/// wizards. A key outside this list still renders, after the listed
+/// ones, so a new [`AccountConfig`] field can never go missing.
 const RENDER_ORDER: [&str; 10] = [
     "default",
     "email",
@@ -333,16 +321,12 @@ const RENDER_ORDER: [&str; 10] = [
 ];
 
 impl AccountConfig {
-    /// Renders this account as an `[accounts.<name>]` block, ready to
-    /// be written to a configuration file or appended to one.
+    /// Renders this account as an `[accounts.<name>]` block.
     ///
-    /// The serializer decides what is written, so a field left at its
-    /// default is omitted and nothing has to be listed here twice.
-    /// What this adds is reading order: the flattened dotted keys come
-    /// out alphabetically, which buries `imap.server` under the
-    /// credentials that authenticate against it, and runs every group
-    /// together. The groups are reordered, `server` is lifted to the
-    /// top of its own, and a blank line separates them.
+    /// The serializer decides what is written, so nothing is listed
+    /// here twice. What this adds is reading order: alphabetical dotted
+    /// keys bury `imap.server` under the credentials authenticating
+    /// against it, so groups are reordered and `server` lifted in each.
     pub fn render(&self, name: &str) -> Result<String> {
         // NOTE: borrowed rather than built into a `Config`, which would
         // mean cloning the account. The emitter only looks for an
@@ -357,8 +341,8 @@ impl AccountConfig {
         };
         let rendered = pimalaya_config::toml::to_string(&document)?;
 
-        // The emitter writes the header itself, and everything below it
-        // is one dotted key per line.
+        // NOTE: the emitter writes the header itself, and everything
+        // below it is one dotted key per line.
         let (header, body) = match rendered.split_once('\n') {
             Some((header, body)) => (header, body),
             None => return Ok(rendered),
@@ -389,8 +373,6 @@ impl AccountConfig {
                 document.push('\n');
             }
 
-            // The endpoint is what the group is about, so it reads
-            // first; the credentials and the quirks qualify it.
             let server = format!("{key}.server ");
             lines.sort_by_key(|line| !line.starts_with(&server));
 
@@ -404,14 +386,13 @@ impl AccountConfig {
     }
 }
 
-/// Parses a `server` field into a [`Url`].
-///
-/// A bare `host:port` must be detected by the absence of `://`: the
-/// URL parser would otherwise read it as `scheme:path` (for instance
-/// `mail.example.com:993` parses as the scheme `mail.example.com`), so
-/// any string without an explicit `://` is treated as an authority
-/// under `default_scheme`. The resulting scheme is validated against
+/// Parses a `server` field into a [`Url`], its scheme checked against
 /// `allowed`.
+///
+/// A bare `host:port` is detected by the absence of `://`, since the
+/// URL parser would otherwise read `mail.example.com:993` as the scheme
+/// `mail.example.com`. Such a string becomes an authority under
+/// `default_scheme`.
 #[allow(dead_code)]
 pub fn parse_server(server: &str, default_scheme: &str, allowed: &[&str]) -> Result<Url> {
     let url = if server.contains("://") {
@@ -432,46 +413,48 @@ pub fn parse_server(server: &str, default_scheme: &str, allowed: &[&str]) -> Res
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ImapConfig {
-    /// IMAP server address. Either a bare authority
-    /// (`imap.example.com[:port]`, treated as `imaps://<authority>`),
-    /// or a full URL with `imap://` (cleartext, optional STARTTLS),
-    /// `imaps://` (implicit TLS) or `unix://` (a local pre-authenticated
-    /// socket proxy such as sirup).
+    /// IMAP server address.
+    ///
+    /// A bare authority (`imap.example.com[:port]`) means `imaps://`. A
+    /// URL takes `imap://` (cleartext, optional STARTTLS), `imaps://`
+    /// (implicit TLS) or `unix://` (pre-authenticated socket proxy).
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default, skip_serializing_if = "is_default")]
     pub starttls: bool,
-    /// ALPN protocol identifiers offered during the TLS handshake. Set
-    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
-    /// default io-imap itself defines applies (`["imap"]`, RFC 7595).
-    /// Only relevant for the rustls provider; `native-tls` ignores ALPN.
+    /// ALPN identifiers offered during the TLS handshake, `[]` skipping
+    /// the negotiation.
+    ///
+    /// Unset applies io-imap's own default (`["imap"]`, RFC 7595). Only
+    /// the rustls provider reads this, native-tls ignoring ALPN.
     #[serde(default)]
     pub alpn: Option<Vec<String>>,
     pub sasl: Option<SaslConfig>,
-    /// RFC 4959 SASL-IR quirk. Left unset, follows the advertised
-    /// `SASL-IR` capability; `false` waits for the server's
-    /// continuation request rather than inlining credentials with
-    /// `AUTHENTICATE`. Coremail (126.com, 163.com) advertises it
-    /// falsely.
+    /// RFC 4959 SASL-IR quirk, following the advertised capability when
+    /// unset.
+    ///
+    /// `false` waits for the server's continuation request rather than
+    /// inlining credentials with `AUTHENTICATE`, which is what Coremail
+    /// (126.com, 163.com) needs, advertising SASL-IR falsely.
     #[serde(default, skip_serializing_if = "is_default")]
     pub sasl_ir: Option<bool>,
-    /// RFC 2971 `ID` extension quirks. Some providers (notably
-    /// mail.qq.com, fastmail) require an `ID` exchange straight after
-    /// authentication; set `id.auto = true` to opt in.
+    /// RFC 2971 `ID` extension quirks.
+    ///
+    /// Some providers (mail.qq.com, fastmail) require an `ID` exchange
+    /// straight after authentication, which `id.auto = true` opts into.
     #[serde(default)]
     pub id: ImapIdConfig,
-    /// RFC 5256 `SORT` extension config.
+    /// RFC 5256 `SORT` extension options.
     #[serde(default)]
     pub sort: ImapSortConfig,
 }
 
 /// Per-account `imap.sort.*` options.
 ///
-/// Accepted so a configuration file shared with the himalaya CLI
-/// loads, but inert here: the TUI paginates a sequence-set window and
-/// reverses it rather than issuing `SORT`, so it has no fallback to
-/// choose between.
+/// Accepted so a configuration shared with the himalaya CLI loads, but
+/// inert here: the interface paginates a sequence-set window and
+/// reverses it rather than issuing `SORT`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ImapSortConfig {
@@ -483,18 +466,14 @@ pub struct ImapSortConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ImapIdConfig {
-    /// When `true`, the auth coroutine chains an `ID` round-trip
-    /// after the tagged auth response. Default `false` skips ID
-    /// entirely.
+    /// Chains an `ID` round-trip after the tagged auth response.
     #[serde(default, skip_serializing_if = "is_default")]
     pub auto: bool,
-
-    /// Parameters sent with the auto-ID command. Empty (default)
-    /// sends `ID NIL`. For each entry: `true` substitutes
-    /// himalaya-tui's canned value for the well-known keys (`name`,
-    /// `version`, `vendor`, `support-url`) or `NIL` for unknown keys;
-    /// `false` always sends `NIL`. Keys absent from this map are not
-    /// transmitted.
+    /// Parameters sent with the auto-ID command, empty sending `ID NIL`.
+    ///
+    /// `true` substitutes the canned value for a well-known key
+    /// (`name`, `version`, `vendor`, `support-url`) and `NIL` for any
+    /// other, `false` always sends `NIL`. An absent key is not sent.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fields: HashMap<String, bool>,
 }
@@ -502,20 +481,21 @@ pub struct ImapIdConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SmtpConfig {
-    /// SMTP server address. Either a bare authority
-    /// (`smtp.example.com[:port]`, treated as `smtps://<authority>`),
-    /// or a full URL with `smtp://` (cleartext, optional STARTTLS),
-    /// `smtps://` (implicit TLS) or `unix://` (a local pre-authenticated
-    /// socket proxy such as sirup).
+    /// SMTP server address.
+    ///
+    /// A bare authority (`smtp.example.com[:port]`) means `smtps://`. A
+    /// URL takes `smtp://` (cleartext, optional STARTTLS), `smtps://`
+    /// (implicit TLS) or `unix://` (pre-authenticated socket proxy).
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default, skip_serializing_if = "is_default")]
     pub starttls: bool,
-    /// ALPN protocol identifiers offered during the TLS handshake. Set
-    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
-    /// default io-smtp itself defines applies (`["smtp"]`, RFC 7595).
-    /// Only relevant for the rustls provider; `native-tls` ignores ALPN.
+    /// ALPN identifiers offered during the TLS handshake, `[]` skipping
+    /// the negotiation.
+    ///
+    /// Unset applies io-smtp's own default (`["smtp"]`, RFC 7595). Only
+    /// the rustls provider reads this, native-tls ignoring ALPN.
     #[serde(default)]
     pub alpn: Option<Vec<String>>,
     pub sasl: Option<SaslConfig>,
@@ -524,35 +504,39 @@ pub struct SmtpConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JmapConfig {
-    /// JMAP server address. Either a bare authority for `/.well-known/jmap`
+    /// JMAP server address: a bare authority for `/.well-known/jmap`
     /// discovery, or a full session-endpoint URL.
     pub server: String,
     #[serde(default)]
     pub tls: TlsConfig,
-    /// ALPN protocol identifiers offered during the TLS handshake. Set
-    /// to `[]` to skip ALPN negotiation entirely. Left unset, the
-    /// default io-jmap itself defines applies (`["http/1.1"]`, JMAP
-    /// riding on HTTP/1.1). Only relevant for the rustls provider;
-    /// `native-tls` ignores ALPN.
+    /// ALPN identifiers offered during the TLS handshake, `[]` skipping
+    /// the negotiation.
+    ///
+    /// Unset applies io-jmap's own default (`["http/1.1"]`, JMAP riding
+    /// on HTTP/1.1). Only the rustls provider reads this, native-tls
+    /// ignoring ALPN.
     #[serde(default)]
     pub alpn: Option<Vec<String>>,
     pub auth: JmapAuthConfig,
-    /// Identity id used when sending. Left unset, the first identity
-    /// reported by `Identity/get` on the live session is used.
+    /// Identity id used when sending, the first one `Identity/get`
+    /// reports when unset.
     pub identity_id: Option<String>,
     /// Drafts mailbox id used to stage a message before submission.
-    /// Left unset, the mailbox whose role is `drafts` (RFC 8621
-    /// section 2.1) is resolved from the live session.
+    ///
+    /// Unset resolves the mailbox whose role is `drafts` (RFC 8621
+    /// section 2.1) from the live session.
     pub drafts_mailbox_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+/// How the JMAP session and its requests authenticate.
 pub enum JmapAuthConfig {
+    /// A verbatim `Authorization` header value.
     Header(Secret),
-    Bearer {
-        token: Secret,
-    },
+    /// An RFC 6750 bearer token.
+    Bearer { token: Secret },
+    /// RFC 7617 basic credentials.
     Basic {
         #[serde(deserialize_with = "shell_expanded_string")]
         username: String,
@@ -563,22 +547,25 @@ pub enum JmapAuthConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MaildirConfig {
-    /// Filesystem root holding the per-account Maildir tree. The
-    /// directory itself must already exist (the wizard does not
-    /// create it); each child mailbox is a `Maildir` (with the
-    /// standard `cur`/`new`/`tmp` subdirs).
+    /// Filesystem root holding the per-account Maildir tree.
+    ///
+    /// The directory must already exist, the wizard never creating it.
+    /// Each child mailbox is a Maildir, with its `cur`, `new` and `tmp`.
     pub root: PathBuf,
 }
 
+/// TLS settings shared by every network backend.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
     pub provider: Option<TlsProviderConfig>,
     #[serde(default)]
     pub rustls: RustlsConfig,
+    /// Extra root certificate trusted on top of the system store.
     pub cert: Option<PathBuf>,
 }
 
+/// The TLS implementation to connect with.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
@@ -586,12 +573,14 @@ pub enum TlsProviderConfig {
     NativeTls,
 }
 
+/// Settings read by the rustls provider alone.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
     pub crypto: Option<RustlsCryptoConfig>,
 }
 
+/// The rustls cryptographic provider.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
@@ -602,10 +591,10 @@ pub enum RustlsCryptoConfig {
 #[allow(dead_code)]
 impl TlsConfig {
     /// Builds the runtime [`Tls`] handle the connect helpers expect.
-    /// `alpn` is the protocol-level ALPN list (`["imap"]`, `["smtp"]`,
-    /// `["http/1.1"]`); pass an empty vec to skip ALPN. The TOML
-    /// schema never exposes `tls.rustls.alpn` directly: the
-    /// per-protocol `*.alpn` field is folded in here.
+    ///
+    /// `alpn` is the protocol-level list, empty to skip the
+    /// negotiation. The schema never exposes `tls.rustls.alpn`
+    /// directly: the per-protocol `*.alpn` field is folded in here.
     pub fn into_tls(self, alpn: Vec<String>) -> Tls {
         Tls {
             provider: self.provider.map(|p| match p {
@@ -626,22 +615,32 @@ impl TlsConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+/// The SASL mechanism a backend authenticates with.
 pub enum SaslConfig {
+    /// RFC 4505 ANONYMOUS.
     Anonymous(SaslAnonymousConfig),
+    /// The LOGIN mechanism, obsolete but still widely deployed.
     Login(SaslLoginConfig),
+    /// RFC 4616 PLAIN.
     Plain(SaslPlainConfig),
+    /// RFC 7628 OAUTHBEARER.
     Oauthbearer(SaslOauthbearerConfig),
+    /// The Google XOAUTH2 mechanism, predating OAUTHBEARER.
     Xoauth2(SaslXoauth2Config),
+    /// RFC 5802 SCRAM-SHA-256.
     #[serde(rename = "scram-sha-256")]
     ScramSha256(SaslScramSha256Config),
 }
 
+/// Credentials of the ANONYMOUS mechanism.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslAnonymousConfig {
+    /// Trace token the server logs, an email address by convention.
     pub message: Option<String>,
 }
 
+/// Credentials of the LOGIN mechanism.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslLoginConfig {
@@ -650,6 +649,7 @@ pub struct SaslLoginConfig {
     pub password: Secret,
 }
 
+/// Credentials of the PLAIN mechanism.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslPlainConfig {
@@ -661,6 +661,7 @@ pub struct SaslPlainConfig {
     pub passwd: Secret,
 }
 
+/// Credentials of the OAUTHBEARER mechanism.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslOauthbearerConfig {
@@ -669,6 +670,7 @@ pub struct SaslOauthbearerConfig {
     pub token: Secret,
 }
 
+/// Credentials of the XOAUTH2 mechanism.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslXoauth2Config {
@@ -677,6 +679,7 @@ pub struct SaslXoauth2Config {
     pub token: Secret,
 }
 
+/// Credentials of the SCRAM-SHA-256 mechanism.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SaslScramSha256Config {
@@ -687,10 +690,10 @@ pub struct SaslScramSha256Config {
 
 #[allow(dead_code)]
 impl SaslConfig {
-    /// Resolves the SASL config into a runtime [`Sasl`]. `host` and
-    /// `port` come from the live server URL; they are only used by
-    /// OAUTHBEARER (echoed in the GS2 header) and ignored by every
-    /// other mechanism.
+    /// Resolves the configuration into a runtime [`Sasl`].
+    ///
+    /// `host` and `port` come from the live server URL and are read by
+    /// OAUTHBEARER alone, which echoes them in its GS2 header.
     pub fn try_into_sasl(self, host: impl ToString, port: u16) -> Result<Sasl> {
         Ok(match self {
             SaslConfig::Anonymous(c) => Sasl::Anonymous(SaslAnonymousCreds { message: c.message }),
@@ -732,11 +735,9 @@ mod tests {
 
     use super::{Config, parse_server};
 
-    /// Every option the himalaya CLI accepts in a block the TUI also
-    /// models must load here, whether the TUI acts on it or not: the
-    /// two binaries share one configuration file, and a
-    /// `deny_unknown_fields` block rejecting a CLI-only option would
-    /// leave that file usable by one binary only.
+    /// Every option the himalaya CLI accepts in a block modelled here
+    /// must load, acted on or not: one file backs both binaries, and a
+    /// block rejecting a CLI-only option would leave it usable by one.
     #[test]
     fn cli_only_options_are_accepted() {
         let toml = r#"
@@ -783,9 +784,8 @@ mod tests {
     }
 
     /// A backend block this build does not model must be ignored rather
-    /// than rejected: one file backs both binaries and every feature set,
-    /// so a block the CLI writes, or one an older build wrote, cannot cost
-    /// the account the backends it still carries.
+    /// than rejected: one file backs every feature set, so a block the
+    /// CLI wrote cannot cost the account the backends it still carries.
     #[test]
     fn a_backend_block_this_build_drops_is_ignored() {
         let toml = r#"
@@ -809,8 +809,8 @@ mod tests {
 
     /// An omitted ALPN list must stay distinguishable from an explicit
     /// empty one: the first resolves to the protocol default at connect
-    /// time, the second deliberately skips ALPN negotiation, and
-    /// collapsing them changes how servers answer the handshake.
+    /// time, the second skips the negotiation, and collapsing the two
+    /// changes how servers answer the handshake.
     #[test]
     fn omitted_alpn_differs_from_an_empty_one() {
         let toml = r#"
@@ -829,8 +829,7 @@ mod tests {
 
     /// A bare authority carrying a port must not be read as a URL: the
     /// scheme grammar accepts dots, so `mail.example.com:993` parses as
-    /// the scheme `mail.example.com` with the path `993`, silently
-    /// connecting nowhere.
+    /// the scheme `mail.example.com` and the path `993`.
     #[test]
     fn bare_authority_keeps_its_host_and_port() {
         let url = parse_server("mail.example.com:993", "imaps", &["imap", "imaps"]).unwrap();
@@ -851,8 +850,8 @@ mod tests {
     }
 
     /// The himalaya CLI spells the identity `email` and `display-name`,
-    /// and one file backs both binaries, so a config its wizard wrote
-    /// must reach the same two fields the TUI composes from.
+    /// and one file backs both binaries, so what its wizard wrote must
+    /// reach the same two fields the composer reads.
     #[test]
     fn the_identity_reads_under_the_cli_spelling() {
         let config: Config = toml::from_str(
@@ -874,10 +873,9 @@ mod tests {
     }
 
     /// The shipped sample is the field reference the README points at,
-    /// so an option renamed here without being renamed there ships a
-    /// template that does not load. Uncommenting every line is not the
-    /// point (many are deliberately exclusive alternatives): the point
-    /// is that what the file does declare still matches the model.
+    /// so an option renamed here and not there ships a template that
+    /// does not load. Only what the file declares is checked, many of
+    /// its lines being deliberately exclusive alternatives.
     #[test]
     fn shipped_sample_config_loads() {
         let sample = include_str!("../config.sample.toml");

@@ -1,10 +1,8 @@
-//! JMAP backend: a thin wrapper around io_jmap's high-level client
-//! plus the adapter that lowers its responses into the shared
-//! cross-protocol email domain types.
+//! # JMAP
 //!
-//! [`client`] holds the [`client::JmapClient`] session wrapper;
-//! [`backend`] holds the `impl JmapClient` adapter methods the shared
-//! interface calls.
+//! JMAP backend: a thin wrapper around io_jmap's high-level client, plus
+//! the adapter lowering its responses into the shared cross-protocol
+//! email domain types.
 
 pub mod backend;
 pub mod client;

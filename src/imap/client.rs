@@ -1,8 +1,10 @@
+//! # IMAP client
+//!
 //! Himalaya TUI wrapper around [`io_imap::client::ImapClientStd`].
 //!
-//! The TUI opens the IMAP session once via [`ImapClient::new`] and then
-//! calls the shared adapter methods (in the sibling `backend` module)
-//! through the [`Deref`]/[`DerefMut`] passthrough to the inner client.
+//! The session is opened once via [`ImapClient::new`], then the sibling
+//! backend module's adapter methods reach the inner client through the
+//! [`Deref`]/[`DerefMut`] passthrough.
 
 use std::ops::{Deref, DerefMut};
 
@@ -22,32 +24,31 @@ use crate::config::{ImapConfig, ImapIdConfig, parse_server};
 
 /// Live IMAP client wrapping the io-imap session.
 ///
-/// State is deliberately minimal: the retained shared-API methods
-/// re-SELECT before every operation and never consult cached
-/// capabilities, so nothing beyond the inner client needs to be kept.
+/// State is deliberately minimal: the shared-API methods re-SELECT
+/// before every operation and never consult cached capabilities, so
+/// nothing beyond the inner client needs keeping.
 pub struct ImapClient {
     inner: Inner,
 }
 
 impl ImapClient {
-    /// Opens the IMAP connection (TCP/TLS/STARTTLS, greeting, SASL),
-    /// offering the configured ALPN identifiers and honoring the
-    /// account's auto-`ID` quirks.
+    /// Opens the IMAP connection: TCP/TLS/STARTTLS, greeting then SASL.
     pub fn new(config: ImapConfig) -> Result<Self> {
         let tls = config
             .tls
             .into_tls(config.alpn.unwrap_or_else(default_alpn));
         let server = parse_imap_server(&config.server)?;
         let sasl: Option<Sasl> = match config.sasl {
-            // NOTE: a `unix://` sirup socket presents a pre-authenticated
-            // session (the greeting is PREAUTH), so no SASL is negotiated.
+            // NOTE: a unix:// sirup socket presents an already
+            // authenticated session (PREAUTH greeting), so no SASL is
+            // negotiated.
             Some(_) if server.scheme() == "unix" => None,
             Some(cfg) => {
                 let host = server
                     .host_str()
                     .ok_or_else(|| anyhow!("Cannot derive host from IMAP server `{server}`"))?;
-                // NOTE: url does not know the imap(s) default ports, so fall
-                // back to the same scheme defaults io-imap connects with.
+                // NOTE: url does not know the imap(s) default ports, so
+                // fall back to the scheme defaults io-imap connects with.
                 let port = server.port().unwrap_or(default_port(server.scheme()));
                 Some(cfg.try_into_sasl(host, port)?)
             }
@@ -64,9 +65,8 @@ impl ImapClient {
         Ok(Self { inner })
     }
 
-    /// Lightweight liveness check: issues an IMAP `NOOP` round-trip to
-    /// confirm the connection is still usable and to poll for any
-    /// pending untagged updates.
+    /// Checks liveness with an IMAP `NOOP`, which also polls for any
+    /// pending untagged update.
     pub fn ping(&mut self) -> Result<()> {
         self.inner.noop()?;
         Ok(())
@@ -89,21 +89,18 @@ impl DerefMut for ImapClient {
 
 /// Parses an IMAP server string into a URL.
 ///
-/// Accepts `imap`/`imaps://host[:port]`, a bare `host:port` or a bare
-/// `host` (the last two default to `imaps://`, secure), or a
-/// `unix:///path` socket for a local proxy such as sirup. Any other
-/// scheme is rejected.
+/// Accepts an `imap://` or `imaps://` URL, a bare authority defaulting
+/// to the secure `imaps://`, or a `unix://` socket path for a local
+/// proxy such as sirup. Any other scheme is rejected.
 pub fn parse_imap_server(server: &str) -> Result<Url> {
     parse_server(server, "imaps", &["imap", "imaps", "unix"])
 }
 
-/// Resolves an [`ImapIdConfig`] into the wire-level parameter list
-/// passed to the io-imap auth coroutines.
+/// Resolves an [`ImapIdConfig`] into the wire-level `ID` parameters.
 ///
-/// [`None`] when `auto = false`; otherwise a vec where each entry
-/// maps the user-supplied key to either himalaya-tui's canned value
-/// (when the user set `true` and the key is well-known) or `NIL`.
-/// Unknown keys with `true` log a warning and fall back to `NIL`.
+/// [`None`] when `auto = false`, otherwise each key maps to the canned
+/// value when the user set `true` and the key is well-known, and to
+/// `NIL` otherwise, an unknown `true` key also logging a warning.
 pub fn resolve_auto_id_params(
     config: &ImapIdConfig,
 ) -> Result<Option<Vec<(IString<'static>, NString<'static>)>>> {
@@ -140,8 +137,8 @@ pub fn resolve_auto_id_params(
     Ok(Some(params))
 }
 
-/// The value substituted for a well-known auto-`ID` key the user opted
-/// into; [`None`] for any other key, which is then sent as `NIL`.
+/// Canned value for a well-known auto-`ID` key, [`None`] for any other
+/// key, which is then sent as `NIL`.
 fn canned_imap_id_value(key: &str) -> Option<&'static str> {
     match key {
         "name" => Some(env!("CARGO_PKG_NAME")),

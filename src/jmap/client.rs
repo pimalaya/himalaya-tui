@@ -1,9 +1,8 @@
-//! himalaya-tui wrapper around [`io_jmap::client::JmapClientStd`] that
-//! bundles the live JMAP session behind [`Deref`]/[`DerefMut`] so the
-//! adapter methods in [`crate::jmap::backend`] can call the high-level
-//! io_jmap methods directly.
+//! # JMAP client
 //!
-//! Built by the TUI model from a [`crate::config::JmapConfig`] block.
+//! Wrapper around [`io_jmap::client::JmapClientStd`] holding the live
+//! JMAP session behind [`Deref`]/[`DerefMut`], so the adapter methods in
+//! [`crate::jmap::backend`] call the high-level io_jmap methods directly.
 
 use std::ops::{Deref, DerefMut};
 
@@ -16,30 +15,27 @@ use url::Url;
 use crate::config::{JmapAuthConfig, JmapConfig, parse_server};
 
 /// Live JMAP session paired with the resolved session-endpoint URL.
-///
-/// The URL is retained so [`JmapClient::ping`] can re-run the session
-/// discovery against the same authority as a liveness check.
 pub struct JmapClient {
     inner: Inner,
-    /// Resolved JMAP session-endpoint URL, kept for [`JmapClient::ping`]
-    /// and any later `session_get` refresh.
+    /// Session-endpoint URL, re-fetched by [`JmapClient::ping`].
     url: Url,
-    /// The original JMAP config block, kept so an auxiliary session can
-    /// be opened against a blob URL living on another authority than the
-    /// API one (see [`JmapClient::download_blob`]).
+    /// Original JMAP config block.
+    ///
+    /// Kept so a blob URL living on another authority than the API one
+    /// can get a session of its own (see [`JmapClient::download_blob`]).
     config: JmapConfig,
-    /// Lazily-fetched `(id, name)` pairs for every mailbox, used by
-    /// [`JmapClient::resolve_mailbox_id`] to map the interface's
-    /// human-facing mailbox names onto opaque JMAP ids. Cached for the
-    /// client's lifetime so a copy or a move resolves both endpoints in
-    /// a single `Mailbox/get`.
+    /// Lazily-fetched `(id, name)` pairs for every mailbox.
+    ///
+    /// Cached for the client's lifetime so a copy or a move resolves
+    /// both of its endpoints in a single `Mailbox/get`.
     mailbox_index: Option<Vec<(String, String)>>,
 }
 
 impl JmapClient {
-    /// Establishes the JMAP session: TLS-connect to the configured
-    /// server then fetch the session object (`/.well-known/jmap`
-    /// discovery, primary accounts, upload/download URL templates).
+    /// Establishes the JMAP session.
+    ///
+    /// TLS-connects to the configured server, then fetches the session
+    /// object.
     pub fn new(config: JmapConfig) -> Result<Self> {
         let tls = config
             .tls
@@ -59,10 +55,10 @@ impl JmapClient {
         })
     }
 
-    /// Liveness check: re-fetches the JMAP session object against the
-    /// configured session endpoint. A successful `Session/get` proves
-    /// the connection is still usable and refreshes the cached session
-    /// (state, upload/download templates) in one round-trip.
+    /// Liveness check: re-fetches the JMAP session object.
+    ///
+    /// A successful `Session/get` proves the connection is still usable
+    /// and refreshes the cached session in one round-trip.
     pub fn ping(&mut self) -> Result<()> {
         self.inner.session_get(&self.url)?;
         Ok(())
@@ -78,19 +74,11 @@ impl JmapClient {
         self.config.drafts_mailbox_id.as_deref()
     }
 
-    /// Maps a human mailbox name to its opaque JMAP id, for the shared
-    /// client which otherwise addresses mailboxes by their id.
+    /// Maps a human mailbox name to its opaque JMAP id.
     ///
-    /// A value that already matches a known id is returned verbatim (id
-    /// passthrough, mirroring IMAP where the name *is* the id); an exact
-    /// display-name match returns the mapped id (first match wins on the
-    /// rare duplicate-name case); an unknown value is handed back as-is
-    /// so the server surfaces the error. The mailbox index is fetched
-    /// once (`Mailbox/get`) and cached.
-    ///
-    /// This lives here, on the himalaya-tui client, precisely so the
-    /// backend operation methods (`list_envelopes`, `add_message`, …)
-    /// stay pure id consumers: name resolution never happens inside them.
+    /// The index is fetched once and cached. A known id passes through
+    /// verbatim, mirroring IMAP where the name is the id, and an unknown
+    /// value is handed back as-is so the server surfaces the error.
     pub fn resolve_mailbox_id(&mut self, mailbox: &str) -> Result<String> {
         if self.mailbox_index.is_none() {
             let output = self.mailbox_get(JmapMailboxGetOptions {
@@ -118,16 +106,12 @@ impl JmapClient {
         Ok(mailbox.to_string())
     }
 
-    /// Downloads a blob whose URL may live on a different authority than
-    /// the JMAP API endpoint. Fastmail, for one, serves downloads from
-    /// `*.fastmailusercontent.com` while the API is on `api.fastmail.com`.
+    /// Downloads a blob, opening its own session on a foreign authority.
     ///
-    /// When the download host matches the API host the live session
-    /// connection is reused; otherwise a fresh authenticated connection
-    /// is opened to the download host. The API socket is *never* reused
-    /// for a foreign host: doing so sends the download request to the
-    /// API server, which (Fastmail) answers with a `302` to its docs
-    /// page and fails the non-redirectable download.
+    /// Fastmail, for one, serves downloads from fastmailusercontent.com
+    /// while the API is on api.fastmail.com. Reusing the API socket for
+    /// a foreign host earns a 302 to its docs page, failing the
+    /// non-redirectable download.
     pub fn download_blob(&mut self, download_url: &Url) -> Result<Vec<u8>> {
         let api_url = {
             let session = self
@@ -168,17 +152,14 @@ impl DerefMut for JmapClient {
 
 /// Parses the JMAP `server` field into a [`Url`].
 ///
-/// Accepts a full `http`/`https://host[:port][/path]` URL, a bare
-/// `host:port`, or a bare `host`; the last two default to `https://`
-/// (secure). Any other scheme is rejected.
+/// Accepts a full http or https URL, a bare `host:port` or a bare
+/// `host`, the last two defaulting to https. Any other scheme is
+/// rejected.
 pub fn parse_jmap_server(server: &str) -> Result<Url> {
     parse_server(server, "https", &["http", "https"])
 }
 
-/// Converts a [`JmapAuthConfig`] into the pre-formatted HTTP
-/// `Authorization` header value [`JmapClientStd::connect`] expects.
-///
-/// [`JmapClientStd::connect`]: io_jmap::client::JmapClientStd::connect
+/// Formats a [`JmapAuthConfig`] into an HTTP `Authorization` value.
 pub fn jmap_http_auth(config: JmapAuthConfig) -> Result<SecretString> {
     match config {
         JmapAuthConfig::Header(token) => Ok(token.get()?),
@@ -194,8 +175,9 @@ pub fn jmap_http_auth(config: JmapAuthConfig) -> Result<SecretString> {
     }
 }
 
-/// Whether two URLs share host and effective port, i.e. a live
-/// connection to one can carry a request for the other.
+/// Whether two URLs share host and effective port.
+///
+/// Same authority means one live connection can carry both requests.
 fn same_authority(a: &Url, b: &Url) -> bool {
     a.host() == b.host() && a.port_or_known_default() == b.port_or_known_default()
 }

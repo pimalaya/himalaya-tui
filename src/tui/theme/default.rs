@@ -1,11 +1,14 @@
-//! Built-in default theme using named ANSI colors. Lets the user's
-//! terminal palette decide the actual shade, so the TUI blends with
-//! whatever color scheme they already use.
+//! # Default theme
+//!
+//! Built-in theme using named ANSI colors, letting the user's terminal
+//! palette decide the actual shades so the TUI blends with whatever
+//! color scheme they already use.
 
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::tui::theme::Theme;
 
+/// Theme built from the terminal ANSI colors.
 pub const THEME: Theme = Theme {
     header: Style::new()
         .bg(Color::Blue)

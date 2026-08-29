@@ -1,9 +1,11 @@
-//! Himalaya TUI wrapper around [`io_smtp::client::SmtpClientStd`].
+//! # SMTP client
 //!
-//! SMTP send is stateless after auth, so the wrapper only holds the
-//! live connection: subcommands that send a message build it up front
-//! from the account's `[smtp]` block and hand it the raw bytes. The
-//! send adapter lives in the sibling `backend` module.
+//! Wrapper around [`io_smtp::client::SmtpClientStd`] holding the live
+//! connection.
+//!
+//! SMTP send is stateless after auth, so nothing else needs keeping:
+//! senders build the client up front from the account's `[smtp]` block
+//! and hand it the raw bytes.
 
 use std::{
     net::Ipv4Addr,
@@ -25,8 +27,7 @@ pub struct SmtpClient {
 }
 
 impl SmtpClient {
-    /// Opens the SMTP connection (TCP/TLS/STARTTLS, greeting, EHLO,
-    /// SASL).
+    /// Opens the SMTP connection: TCP/TLS/STARTTLS, greeting, EHLO, SASL.
     pub fn new(config: SmtpConfig) -> Result<Self> {
         let tls = config
             .tls
@@ -41,7 +42,7 @@ impl SmtpClient {
                 let host = server
                     .host_str()
                     .ok_or_else(|| anyhow!("Cannot derive host from SMTP server `{server}`"))?;
-                // NOTE: url does not know the smtp(s) default ports, so match
+                // NOTE: url knows no smtp(s) default port, so match
                 // io-smtp's own connection defaults (465 for smtps).
                 let port = server
                     .port()
@@ -75,10 +76,9 @@ impl DerefMut for SmtpClient {
 
 /// Parses an SMTP server string into a URL.
 ///
-/// Accepts `smtp`/`smtps://host[:port]`, a bare `host:port` or a bare
-/// `host` (the last two default to `smtps://`, secure), or a
-/// `unix:///path` socket for a local proxy such as sirup. Any other
-/// scheme is rejected.
+/// Accepts an smtp or smtps URL, a bare `host:port` or a bare `host`
+/// (the last two defaulting to smtps), or a unix socket for a local
+/// proxy such as sirup. Any other scheme is rejected.
 pub fn parse_smtp_server(server: &str) -> Result<Url> {
     parse_server(server, "smtps", &["smtp", "smtps", "unix"])
 }

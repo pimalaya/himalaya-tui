@@ -1,4 +1,4 @@
-//! JMAP wizard.
+//! # JMAP wizard
 //!
 //! A discovery entry pins the session endpoint and the authentication
 //! method, so [`configure_discovered`] prompts only the credentials.
@@ -21,12 +21,11 @@ use crate::{
 const BASIC: &str = "Basic (username + password)";
 const BEARER: &str = "Bearer (API token)";
 
-/// Configures JMAP from a discovered entry: the endpoint is pinned, the
-/// HTTP authentication scheme is picked among the advertised ones (skipped
-/// when only one qualifies), then its credentials are prompted. The
-/// connection is tested and its role-based `mailbox.alias.*` entries
-/// discovered on the same session, so the caller skips the final account
-/// test.
+/// Configures JMAP from a discovered entry.
+///
+/// The HTTP authentication scheme is picked among the advertised ones,
+/// then its credentials prompted. The connection is tested and its
+/// aliases discovered here, so the caller skips the account test.
 pub fn configure_discovered(
     account_name: &str,
     email: &str,
@@ -48,10 +47,12 @@ pub fn configure_discovered(
     Ok((config, aliases))
 }
 
-/// Connects to JMAP, which is the connection test, and best-effort
-/// discovers the role-based mailbox aliases on the same session. A failed
-/// connection is the wizard's error; a failed listing only means fewer
-/// aliases.
+/// Connects to JMAP, then discovers the role-based mailbox aliases on
+/// the same session.
+///
+/// Connecting is the connection test, so a failure is the wizard's
+/// error; the listing is best-effort, a failure there only meaning
+/// fewer aliases.
 fn test_and_discover(config: &JmapConfig) -> Result<HashMap<String, String>> {
     let spinner = Spinner::start("Testing JMAP connection");
 
@@ -67,9 +68,11 @@ fn test_and_discover(config: &JmapConfig) -> Result<HashMap<String, String>> {
     Ok(mailbox::jmap_aliases(&mut client))
 }
 
-/// Prompts the HTTP authentication scheme from `caps` (both offered when
-/// none was advertised), then its credentials. The Bearer token flow shows
-/// the OAuth brokers only when a grant was advertised.
+/// Prompts the HTTP authentication scheme from `caps`, then its
+/// credentials.
+///
+/// Both schemes are offered when none was advertised, and the Bearer
+/// flow shows the OAuth brokers only when a grant was.
 fn prompt_auth(
     account_name: &str,
     login_hint: Option<&str>,
@@ -104,6 +107,7 @@ fn prompt_auth(
     })
 }
 
+/// The JMAP config for a discovered session endpoint and its auth.
 fn jmap_config(server: String, auth: JmapAuthConfig) -> JmapConfig {
     JmapConfig {
         server,

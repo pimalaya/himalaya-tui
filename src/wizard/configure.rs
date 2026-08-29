@@ -1,12 +1,12 @@
+//! # Account configuration
+//!
 //! What becomes of the account [`super::discover`] built: a file to
 //! create, a block to append to the one already there, or nothing.
 //!
 //! This is the himalaya CLI's `configure` command minus its printing.
-//! Declining the offer prints nothing, where the CLI hands the document
-//! to stdout, a configuration being all it has to give; here the account
-//! is opened either way, for this session alone when nothing was
-//! written. The offer is kept rather than dropped, so that stdout is the
-//! whole of the difference between the two wizards.
+//! The offer is kept so that stdout is the whole of the difference
+//! between the two wizards: declining prints nothing, and the account is
+//! opened either way, for this session alone when nothing was written.
 //!
 //! Appending is a plain text append rather than a re-serialization, so
 //! comments, ordering and hand-written formatting come out untouched.
@@ -26,13 +26,11 @@ use crate::{
     wizard::discover::{self, CONFIG_SAMPLE_URL},
 };
 
-/// Runs the wizard and hands back the account to open, under the name
-/// it would be filed as.
+/// Runs the wizard and hands back the account to open, with its name.
 ///
 /// `seed` answers the first prompt outright, which is what the
 /// positional argument is for. The account is offered to the
-/// configuration file on the way out, and comes back whether or not it
-/// landed there.
+/// configuration file on the way out, and comes back either way.
 pub fn run(seed: Option<&str>, config_paths: &[PathBuf]) -> Result<(String, AccountConfig)> {
     if !stdin().is_terminal() {
         bail!(
@@ -56,13 +54,12 @@ pub fn run(seed: Option<&str>, config_paths: &[PathBuf]) -> Result<(String, Acco
     Ok((name, account))
 }
 
-/// Frames himalaya-tui, names the configuration file that is missing,
-/// and points at the sample for everything the wizard does not cover.
+/// Introduces himalaya-tui and names the configuration file missing at
+/// `path`.
 ///
 /// Printed before the offer a bare `himalaya-tui` raises when it finds
 /// no configuration, so the wizard introduces itself to someone who did
-/// not ask for it. A run that asked for the wizard, with `--no-config`
-/// or with an address to open, skips it.
+/// not ask for it. A run that asked for it skips this.
 pub fn print_welcome(path: &Path) {
     eprintln!();
     eprintln!("Welcome to Himalaya TUI, the TUI to manage emails.");
@@ -85,21 +82,21 @@ pub fn print_welcome(path: &Path) {
     eprintln!();
 }
 
-/// What a configuration file already on disk constrains in the
-/// generated account: the names it takes, and whether one of its
-/// accounts already claims the default.
+/// What a configuration already on disk constrains in a new account.
+///
+/// Namely the names it cannot take, and whether one of its accounts
+/// already claims the default.
 struct ExistingConfig {
     names: Vec<String>,
     has_default: bool,
 }
 
 impl ExistingConfig {
-    /// Reads the configuration at the given path, or `None` when no
-    /// file is there.
+    /// Reads the configuration at `path`, or `None` when no file is
+    /// there.
     ///
-    /// A file that fails to parse is an error rather than a `None`:
-    /// appending to a broken document would bury the actual problem
-    /// under a second one.
+    /// A parse failure is an error rather than a `None`: appending to a
+    /// broken document would bury the actual problem under a second one.
     fn read(path: &Path) -> Result<Option<Self>> {
         if !path.exists() {
             return Ok(None);
@@ -115,13 +112,11 @@ impl ExistingConfig {
     }
 }
 
-/// The name discovery proposes, suffixed until the configuration does
-/// not already hold it.
+/// The name discovery proposes, suffixed until it is free.
 ///
-/// Not prompted: the name is only the TOML table key, and whoever wants
-/// another one renames it in the file. It still has to be free, since a
-/// second `[accounts.<name>]` table makes the whole document fail to
-/// parse, taking the accounts that used to work down with it.
+/// Not prompted, the name being only the TOML table key. It still has
+/// to be free: a second `[accounts.<name>]` table makes the whole
+/// document fail to parse, taking the working accounts down with it.
 fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
     let taken = existing
         .map(|config| config.names.as_slice())
@@ -144,9 +139,10 @@ fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
     }
 }
 
-/// Offers to write the generated account to the configuration file,
-/// creating it or appending to the one already there. Declining writes
-/// nothing and says nothing: the account is opened all the same.
+/// Offers to write the generated account to the configuration file.
+///
+/// Creates the file or appends to the one already there. Declining
+/// writes nothing and says nothing: the account is opened all the same.
 fn offer_to_save(path: &Path, exists: bool, name: &str, account: &AccountConfig) -> Result<()> {
     let prompt = if exists {
         format!("Append account `{name}` to {}?", path.display())
@@ -171,8 +167,8 @@ fn offer_to_save(path: &Path, exists: bool, name: &str, account: &AccountConfig)
     Ok(())
 }
 
-/// Writes the account as a new configuration file, creating the
-/// directory it lives in.
+/// Writes the account as a new configuration file, creating its
+/// directory.
 fn save(path: &Path, document: &str) -> Result<()> {
     if let Some(parent) = path
         .parent()
@@ -230,8 +226,8 @@ mod tests {
         env::temp_dir().join(format!("himalaya-tui-configure-{id}.toml"))
     }
 
-    /// A minimal account naming a Maildir root, the one backend needing
-    /// no network to describe.
+    /// A minimal account naming a Maildir root, the backend needing no
+    /// network.
     fn account(default: bool) -> AccountConfig {
         AccountConfig {
             default,
@@ -255,8 +251,8 @@ mod tests {
             Some(Path::new("/tmp/mail"))
         );
 
-        // Every other field is left at its default, so none of them is
-        // written: a generated document holds what was configured.
+        // A generated document holds what was configured, every other
+        // field staying at its default.
         assert!(!document.contains("imap"));
         assert!(!document.contains("signature"));
 
@@ -270,8 +266,8 @@ mod tests {
     #[test]
     fn the_endpoint_reads_before_its_credentials() {
         // Serialized alphabetically, `maildir.root` would sit under any
-        // sibling sorting before it; the renderer lifts the endpoint of
-        // a group to its top.
+        // sibling sorting before it: the renderer lifts a group's
+        // endpoint to its top.
         let document = account(true).render("perso").expect("render the account");
         let maildir: Vec<&str> = document
             .lines()

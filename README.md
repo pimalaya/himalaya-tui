@@ -100,7 +100,9 @@ nix run
 
 ## Configuration
 
-Run `himalaya-tui`. With no account to open, the wizard asks for an email address, searches the services reachable from it, prompts the authentication the chosen one advertised, tests the connection, then offers to write the resulting `[accounts.<name>]` block to disk. Declining opens the account for that session alone. Ask for the wizard on a configured run with `--no-config`, or pass an address as the positional argument to answer its first prompt. Discovery resolves DNS through the host's own resolver; override it with `HIMALAYA_DNS_RESOLVER=<URL>`.
+Run `himalaya-tui`. With no account to open, the wizard asks for an email address, searches the services reachable from it, prompts the authentication the chosen one advertised, tests the connection, then offers to write the resulting `[accounts.<name>]` block to disk.
+
+Declining opens the account for that session alone. Ask for the wizard on a configured run with `--no-config`, or pass an address as the positional argument to answer its first prompt. Discovery resolves DNS through the host's own resolver, overridable with `HIMALAYA_DNS_RESOLVER=<URL>`.
 
 A configuration is loaded from the first valid path among:
 
@@ -119,7 +121,9 @@ Pick the account to open with `-a <NAME>`, or let the one flagged `default = tru
 
 ### Provider recipes
 
-The account blocks are the ones the CLI documents, so the ready-made configurations for Proton Mail, Fastmail, Gmail, Outlook, Posteo and iCloud Mail live once, in the [himalaya Configuration section](https://github.com/pimalaya/himalaya#configuration), and apply verbatim here. Only the CLI-only keys around them are ignored by the TUI.
+The account blocks are the ones the CLI documents, so the ready-made configurations for Proton Mail, Fastmail, Gmail, Outlook, Posteo and iCloud Mail live once, in the [himalaya Configuration section](https://github.com/pimalaya/himalaya#configuration), and apply verbatim here.
+
+Only the CLI-only keys around them are ignored.
 
 ### Theming
 
@@ -137,9 +141,11 @@ mod = ["bold", "italic"]
 
 Color values accept named ANSI (`"blue"`, `"dark-gray"`, …), hex (`"#ff8800"`), 256-color indices (`"33"`), or `"reset"` for the terminal default. `mod` is a list of `bold`, `dim`, `italic`, `underlined`, `slow-blink`, `rapid-blink`, `reversed`, `hidden`, `crossed-out`.
 
-Overrides are merged on top of the preset: any field you leave out keeps the preset value, so you can change just one attribute (e.g. only the cursor `fg`) and inherit the rest. Themable elements: `header`, `status-bar`, `border-active`, `border-inactive`, `dialog-border`, `cursor`, `mailbox-current`, `envelope-header`, `envelope-seen`, `envelope-unread`, `message-body`, `compose-text`, `compose-cursor`, `compose-selection`.
+Overrides are merged on top of the preset: any field you leave out keeps the preset value, so you can change just one attribute (only the cursor `fg`, say) and inherit the rest.
 
-The presets shipped with the binary are `default` (named ANSI, the built-in), `dracula-dark`, `one-light` and `tokyo-night`. They live as plain Rust files under [src/tui/theme](./src/tui/theme/); pull requests adding new presets are welcome (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
+Themable elements: `header`, `status-bar`, `border-active`, `border-inactive`, `dialog-border`, `cursor`, `mailbox-current`, `envelope-header`, `envelope-seen`, `envelope-unread`, `message-body`, `compose-text`, `compose-cursor`, `compose-selection`.
+
+The presets shipped with the binary are `default` (named ANSI, the built-in), `dracula-dark`, `one-light` and `tokyo-night`. They live as plain Rust files under [src/tui/theme](./src/tui/theme/), and pull requests adding new ones are welcome (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
 ## Usage
 
@@ -158,7 +164,9 @@ Top-level navigation, supporting Vim and Emacs keybinds:
 | `Esc`, `q`, `Ctrl-g` | Close panel / dialog / quit |
 | `Ctrl-c` | Start a new draft |
 
-The envelope list is paged, one screenful at a time, and the panel names the page it is on when the mailbox holds more than one. A page is therefore never half off screen, and it is re-cut around the selected envelope when the terminal is resized. Moving past either end of a page loads the next or previous one, so a mailbox reads as a single list whichever keys walk it.
+The envelope list is paged one screenful at a time, and the panel names the page it is on when the mailbox holds more than one. A page is therefore never half off screen, and it is re-cut around the selected envelope when the terminal is resized.
+
+Moving past either end of a page loads the next or the previous one, so a mailbox reads as a single list whichever keys walk it.
 
 Composer:
 
@@ -167,19 +175,21 @@ Composer:
 | `Ctrl-e`, `Alt-e` | Hand off to `$VISUAL` or `$EDITOR` for the current draft |
 | `Esc` | Open the compose actions dialog (Send, Preview, Save to Drafts, Cancel) |
 
-The `--keybinds <vim|emacs>` flag (and the top-level `keybinds = "emacs"` TOML field) changes the in-app composer's edtui keybinds. In Vim mode, `Ctrl-e` (edtui's normal-mode binding) opens the external editor; in Emacs mode, `Ctrl-e` is rebound to "move to end of line" and `Alt-e` is the only system-editor key.
+The `--keybinds <vim|emacs>` flag, and the top-level `keybinds = "emacs"` TOML field, changes the in-app composer's edtui keybinds.
+
+In Vim mode `Ctrl-e` opens the external editor, edtui binding it in normal mode. In Emacs mode `Ctrl-e` moves to the end of the line instead, leaving `Alt-e` as the only system-editor key.
 
 Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag.
 
 ### Composing messages
 
-Drafts are written in [MML](https://github.com/pimalaya/mml) and compiled to MIME on send. Headers (`From`, `To`, `Subject`…) live at the top of the buffer; the body and any MML directives (attachments, signing, encryption) follow.
+Drafts are written in [MML](https://github.com/pimalaya/mml) and compiled to MIME on send. Headers (`From`, `To`, `Subject`…) live at the top of the buffer, then the body and any MML directives (attachments, signing, encryption).
 
 Sending routes through the storage backend when it can send on its own (JMAP), otherwise through the `[accounts.<name>.smtp]` transport, which connects on the first send rather than at startup. Drafts can be saved to the `Drafts` mailbox at any time.
 
 ### Re-using sessions
 
-An `imap.server` or `smtp.server` given as `unix:///path/to/socket` reaches a local socket proxy such as [sirup](https://github.com/pimalaya/sirup), whose greeting is already authenticated: no credentials are configured on this side and none are negotiated over the socket.
+An `imap.server` or `smtp.server` given as `unix:///path/to/socket` reaches a local socket proxy such as [sirup](https://github.com/pimalaya/sirup), whose greeting is already authenticated. No credentials are configured on this side, and none are negotiated over the socket.
 
 ## Interfaces
 

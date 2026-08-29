@@ -1,15 +1,13 @@
-//! Email-driven service discovery for the wizard.
+//! # Service search
 //!
-//! Mirrors the cardamum-android configuration screen, adapted to mail:
-//! the address feeds io-pim-discovery's parallel discovery (fixed
-//! provider rules, PACC, Mozilla autoconfig, RFC 6186 SRV, RFC 8620
-//! JMAP resolve, with a final WWW-Authenticate probe refining the
-//! advertised schemes), and every reachable service becomes one
-//! selectable entry carrying the authentication capabilities it
-//! advertised (the concrete method is picked once the service is
-//! chosen). A detected Google or Microsoft account collapses to its
-//! dedicated configurations (the proprietary Gmail / Graph APIs plus
-//! IMAP+SMTP), matching the app's provider short-circuit.
+//! Feeds an email address to io-pim-discovery's parallel discovery, and
+//! turns every reachable service into one selectable entry carrying the
+//! authentication capabilities it advertised.
+//!
+//! The mechanisms are the provider rules, PACC, Mozilla autoconfig, RFC
+//! 6186 SRV and RFC 8620 JMAP resolve, with a final WWW-Authenticate
+//! probe refining the advertised schemes. A detected Google or Microsoft
+//! account collapses to its dedicated configurations.
 
 use std::{collections::BTreeSet, env, fmt, time::Duration};
 
@@ -28,22 +26,27 @@ use io_pim_discovery::{
 use pimalaya_stream::tls::{Rustls, Tls};
 use url::Url;
 
-/// DNS-over-TCP resolver backing discovery when `HIMALAYA_DNS_RESOLVER`
-/// is unset and no system resolver is found: Cloudflare's `1.1.1.1`.
+/// The last-resort DNS-over-TCP resolver, Cloudflare's `1.1.1.1`.
+///
+/// Used when `HIMALAYA_DNS_RESOLVER` is unset and no system resolver is
+/// found.
 const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
-/// Upper bound on the parallel discovery fan-out. An unreachable
-/// endpoint (a firewalled port, a black-hole host) must not stall the
-/// interactive wizard, so mechanisms that have not reported by then are
-/// abandoned and only what completed in time is offered.
+/// Upper bound on the parallel discovery fan-out.
+///
+/// An unreachable endpoint (a firewalled port, a black-hole host) must
+/// not stall the interactive wizard, so mechanisms that have not
+/// reported by then are abandoned.
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// One selectable service to reach the account, carrying the
-/// authentication capabilities it advertised. The concrete method (SASL
-/// mechanism, HTTP scheme) is picked in a second prompt once the service
-/// is chosen, so a service appears exactly once in the list.
+/// One selectable service, with the authentication it advertised.
+///
+/// The concrete method (SASL mechanism, HTTP scheme) is picked in a
+/// second prompt once the service is chosen, so a service appears
+/// exactly once in the list.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Discovered {
+    /// The service reached, with the endpoint behind it.
     pub kind: DiscoveredKind,
     /// Login hint advertised by the mechanism (usually the email).
     pub username: Option<String>,
@@ -55,8 +58,7 @@ pub struct Discovered {
 /// standards (the proprietary APIs have fixed endpoints).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveredKind {
-    /// An IMAP endpoint for receiving, paired with the SMTP endpoint
-    /// for sending when one was discovered.
+    /// An IMAP endpoint, with the SMTP one when it was discovered too.
     ImapSmtp {
         imap: TcpEndpoint,
         smtp: Option<TcpEndpoint>,
@@ -77,29 +79,26 @@ pub struct TcpEndpoint {
     pub security: DiscoverySecurity,
 }
 
-/// The authentication capabilities a service advertised, folded across
-/// all its discovered methods. It drives the per-service auth prompt:
-/// which SASL mechanisms or HTTP schemes to offer, and whether the OAuth
-/// token brokers appear. Himalaya reads a token an external manager (such
-/// as Ortie) issues but never runs a grant itself, so OAuth is not a
-/// method of its own here: it only unlocks the brokers behind the API
-/// token flow (see [`super::secret`]).
+/// The authentication a service advertised, folded across its methods.
+///
+/// It drives the per-service auth prompt. Himalaya reads a token an
+/// external manager issues but never runs a grant, so OAuth is no method
+/// of its own: it only unlocks the brokers (see [`super::secret`]).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AuthCaps {
-    /// Basic/password auth: SASL PLAIN/LOGIN/SCRAM for IMAP+SMTP, Basic
-    /// for JMAP. Often an app password (e.g. Fastmail, Gmail).
+    /// Password auth: SASL PLAIN/LOGIN/SCRAM, or HTTP Basic.
     pub basic: bool,
-    /// A static bearer/API token: SASL OAUTHBEARER/XOAUTH2 for IMAP+SMTP,
-    /// Bearer for JMAP.
+    /// A static token: SASL OAUTHBEARER/XOAUTH2, or HTTP Bearer.
     pub bearer: bool,
-    /// An OAuth 2.0 grant is advertised, so a broker can issue the token.
+    /// An OAuth 2.0 grant, so a broker can issue the token.
     pub oauth: bool,
 }
 
 impl AuthCaps {
-    /// Whether any capability was advertised. When none was (a mechanism
-    /// that names no auth), the auth prompt offers every method so the
-    /// user is never left without a choice.
+    /// Whether any capability was advertised.
+    ///
+    /// When none was, the auth prompt offers every method so the user is
+    /// never left without a choice.
     pub fn any(self) -> bool {
         self.basic || self.bearer || self.oauth
     }
@@ -122,10 +121,11 @@ impl fmt::Display for Discovered {
 }
 
 impl Discovered {
-    /// Best default login for the credential prompt: the advertised
-    /// username when it looks like an address, else the searched email
-    /// when the user typed a full one, else nothing (a bare domain,
-    /// whose synthesized `@domain` form is rejected here).
+    /// The best default login for the credential prompt.
+    ///
+    /// The advertised username when it looks like an address, else the
+    /// searched email when the user typed a full one, else nothing (the
+    /// synthesized `@domain` form of a bare domain is rejected here).
     pub fn login_default(&self, email: &str) -> Option<String> {
         self.username
             .clone()
@@ -133,8 +133,7 @@ impl Discovered {
             .or_else(|| looks_like_address(email).then(|| email.to_string()))
     }
 
-    /// Ranks an entry for the selection list: JMAP first, then IMAP+SMTP,
-    /// then the proprietary APIs.
+    /// Ranks an entry: JMAP, then IMAP+SMTP, then the proprietary APIs.
     fn rank(&self) -> u8 {
         match self.kind {
             DiscoveredKind::Jmap(_) => 0,
@@ -144,8 +143,9 @@ impl Discovered {
     }
 }
 
-/// Searches every mail service reachable from `email` and returns one
-/// selectable entry per service and authentication method, ordered by
+/// Searches every mail service reachable from `email`.
+///
+/// One selectable entry per service comes back, ordered by
 /// [`Discovered::rank`]. A detected Google or Microsoft account yields
 /// only its dedicated configurations.
 pub fn search(email: &str) -> Result<Vec<Discovered>> {
@@ -174,10 +174,9 @@ pub fn search(email: &str) -> Result<Vec<Discovered>> {
         });
     }
 
-    // A detected provider restricts IMAP+SMTP to its own configs, so
-    // the app-style dedicated set shows instead of every discovered
-    // relay. IMAP and SMTP may advertise different auth, so the entry
-    // carries the union of both sides' capabilities.
+    // A detected provider restricts IMAP+SMTP to its own configs, so its
+    // dedicated set shows instead of every discovered relay. IMAP and
+    // SMTP may advertise different auth, hence the union of both sides.
     if let Some(imap) = best(&configs, DiscoveryService::Imap, provider)
         && let Some(endpoint) = tcp_endpoint(imap)
     {
@@ -223,9 +222,10 @@ pub fn search(email: &str) -> Result<Vec<Discovered>> {
     Ok(found)
 }
 
-/// Resolves the provider from the email domain (fast path for consumer
-/// addresses), falling back to any provider-tagged config, which
-/// catches custom domains detected through their MX records.
+/// Resolves the provider from the email domain.
+///
+/// The fallback on any provider-tagged config catches the custom domains
+/// detected through their MX records.
 fn provider_of(email: &str, configs: &[DiscoveryServiceConfig]) -> Option<DiscoveryKnownProvider> {
     let by_domain = email
         .rsplit_once('@')
@@ -239,9 +239,10 @@ fn provider_of(email: &str, configs: &[DiscoveryServiceConfig]) -> Option<Discov
     })
 }
 
-/// Folds a service's advertised methods into its [`AuthCaps`]: password
-/// into `basic`, bearer into `bearer`, and every OAuth grant into `oauth`
-/// (which only unlocks the token brokers, never a self-run grant).
+/// Folds a service's advertised methods into its [`AuthCaps`].
+///
+/// Password into `basic`, bearer into `bearer`, and every OAuth grant
+/// into `oauth`, which only unlocks the token brokers.
 fn caps_of(auth: &[DiscoveryAuthMethod]) -> AuthCaps {
     let mut caps = AuthCaps::default();
 
@@ -256,10 +257,10 @@ fn caps_of(auth: &[DiscoveryAuthMethod]) -> AuthCaps {
     caps
 }
 
-/// Picks the best config for a TCP service, restricted to the detected
-/// provider's own configs when there is one: the most secure endpoint
-/// wins, so a domain advertising both implicit TLS and STARTTLS keeps
-/// the former.
+/// Picks the most secure config for a TCP service.
+///
+/// Restricted to a detected provider's own configs, and a domain
+/// advertising both implicit TLS and STARTTLS keeps the former.
 fn best(
     configs: &[DiscoveryServiceConfig],
     service: DiscoveryService,
@@ -285,8 +286,7 @@ fn best(
         })
 }
 
-/// Whether a string is a full `local@domain` address (both parts
-/// non-empty), rejecting the bare-domain `@domain` form.
+/// Whether a string is a full `local@domain` address, both parts filled.
 fn looks_like_address(value: &str) -> bool {
     value
         .split_once('@')
@@ -309,11 +309,11 @@ fn tcp_endpoint(config: &DiscoveryServiceConfig) -> Option<TcpEndpoint> {
     }
 }
 
-/// Resolver used by discovery: the `HIMALAYA_DNS_RESOLVER` override
-/// first, then the system resolver (`/etc/resolv.conf` on unix, the
-/// network adapters on windows), then the Cloudflare default. This
-/// avoids leaking the email domain to a third-party resolver and works
-/// around networks that block the default.
+/// The resolver discovery runs on, most specific first.
+///
+/// The `HIMALAYA_DNS_RESOLVER` override, then the system resolver, then
+/// Cloudflare. Preferring the system one avoids leaking the email domain
+/// to a third party, and works around networks blocking the default.
 pub fn discovery_resolver() -> Url {
     if let Ok(resolver) = env::var("HIMALAYA_DNS_RESOLVER")
         && let Ok(url) = resolver.parse()
@@ -330,8 +330,9 @@ pub fn discovery_resolver() -> Url {
         .expect("DEFAULT_RESOLVER must be a valid URL")
 }
 
-/// TLS profile for the HTTPS-bound discovery mechanisms; they only
-/// speak HTTP/1.1 to `_well-known` endpoints.
+/// The TLS profile for the HTTPS-bound discovery mechanisms.
+///
+/// They only speak HTTP/1.1 to `_well-known` endpoints.
 fn discovery_tls() -> Tls {
     Tls {
         rustls: Rustls {

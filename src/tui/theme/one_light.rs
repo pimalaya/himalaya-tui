@@ -1,7 +1,6 @@
-//! Atom One Light 24-bit RGB palette.
-//! bg=#fafafa, line-bg=#e5e5e6, mono-1=#383a42, mono-3=#a0a1a7,
-//! cyan=#0184bc, blue=#4078f2, magenta=#a626a4, green=#50a14f,
-//! red=#e45649, orange=#c18401
+//! # One Light theme
+//!
+//! Light theme built from the 24-bit RGB Atom One Light palette.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -15,6 +14,7 @@ const CYAN: Color = Color::Rgb(0x01, 0x84, 0xbc);
 const BLUE: Color = Color::Rgb(0x40, 0x78, 0xf2);
 const ORANGE: Color = Color::Rgb(0xc1, 0x84, 0x01);
 
+/// Theme built from the Atom One Light palette.
 pub const THEME: Theme = Theme {
     header: Style::new().bg(BLUE).fg(BG).add_modifier(Modifier::BOLD),
     status_bar: Style::new().bg(LINE_BG).fg(MONO_1),

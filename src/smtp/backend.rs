@@ -1,11 +1,11 @@
-//! SMTP adapter for the shared cross-protocol client.
+//! # SMTP backend
 //!
-//! SMTP is send-only: it serves as a sending transport for storage
-//! backends that cannot send themselves (IMAP, Maildir).
-//! `send_message` derives the RFC 5321 envelope from the raw message
-//! headers (From: as the reverse path; To:/Cc:/Bcc: as the forward
-//! paths), then reuses [`SmtpClient`]'s `send`. The envelope parsing is
-//! lifted from the retired io-email SMTP driver.
+//! SMTP adapter for the shared cross-protocol client: send-only, it is
+//! the sending transport of storage backends that cannot send
+//! themselves, IMAP and Maildir.
+//!
+//! The RFC 5321 envelope is derived from the raw message headers, From:
+//! giving the reverse path and To:, Cc:, Bcc: the forward paths.
 
 use std::borrow::Cow;
 
@@ -21,8 +21,9 @@ use mail_parser::{Address as MailParserAddress, MessageParser};
 use crate::smtp::client::SmtpClient;
 
 impl SmtpClient {
-    /// Runs the RFC 5321 mail transaction (MAIL FROM / RCPT TO / DATA)
-    /// for `raw`, deriving the envelope from its headers.
+    /// Runs the RFC 5321 mail transaction: MAIL FROM, RCPT TO, DATA.
+    ///
+    /// The envelope is derived from the headers of `raw`.
     pub fn send_message(&mut self, raw: Vec<u8>) -> Result<()> {
         let (reverse, forwards) = {
             let parsed = MessageParser::default()
@@ -61,8 +62,7 @@ impl SmtpClient {
     }
 }
 
-/// Flattens a mail-parser address group into bare `local-part@domain`
-/// strings.
+/// Flattens an address group into bare `local-part@domain` strings.
 fn addresses(group: &MailParserAddress<'_>) -> Vec<String> {
     group
         .clone()
@@ -75,7 +75,7 @@ fn addresses(group: &MailParserAddress<'_>) -> Vec<String> {
         .collect()
 }
 
-/// First address in a group; picks the `From:` envelope sender.
+/// First address in a group, picking the From: envelope sender.
 fn first_address(group: &MailParserAddress<'_>) -> Option<String> {
     addresses(group).into_iter().next()
 }

@@ -1,10 +1,12 @@
-//! Connection tests backing the wizard.
+//! # Connection tests
 //!
-//! A discovered account is validated before the session opens, so a bad
+//! Validates a discovered account before the session opens, so a bad
 //! credential or endpoint stops the wizard where it was typed rather
-//! than surfacing as a blank interface. Each test is the ordinary
-//! client constructor: opening a session is what the TUI does next
-//! anyway, and a second code path could pass where the real one fails.
+//! than surfacing as a blank interface.
+//!
+//! Each test is the ordinary client constructor: opening a session is
+//! what the TUI does next anyway, and a second code path could pass
+//! where the real one fails.
 
 use anyhow::Result;
 #[cfg(feature = "imap")]
@@ -14,11 +16,11 @@ use crate::config::AccountConfig;
 #[cfg(feature = "imap")]
 use crate::config::ImapConfig;
 
-/// Tests every backend the account has configured, failing on the
-/// first error.
+/// Tests every backend the account configured, failing on the first
+/// error.
 ///
-/// Used for the flows that configure without connecting (the local
-/// backends); the IMAP+SMTP and JMAP flows test each connection as they
+/// For the flows that configure without connecting (the local
+/// backends): the IMAP+SMTP and JMAP flows test each connection as they
 /// prompt for it, and tell the wizard to skip this.
 pub fn test_account(account_config: &AccountConfig) -> Result<()> {
     #[cfg(feature = "imap")]
@@ -58,11 +60,11 @@ pub fn connect_smtp(config: &crate::config::SmtpConfig) -> Result<()> {
     Ok(())
 }
 
-/// Opens an unauthenticated IMAP connection to `server` (implicit TLS
-/// or STARTTLS) purely to read the server's CAPABILITY, and returns the
-/// authentication mechanisms it advertises (most preferred first, LOGIN
-/// last). Lets the wizard offer only what the server supports; the
-/// connection is dropped without authenticating.
+/// The SASL mechanisms `server` advertises, most preferred first.
+///
+/// The connection is opened unauthenticated (implicit TLS or STARTTLS)
+/// only to read CAPABILITY, so the wizard offers just what the server
+/// supports; LOGIN is ordered last.
 #[cfg(feature = "imap")]
 pub fn probe_imap_mechanisms(server: &str, starttls: bool) -> Result<Vec<SaslMechanism>> {
     use io_imap::{
@@ -86,6 +88,7 @@ pub fn probe_imap_mechanisms(server: &str, starttls: bool) -> Result<Vec<SaslMec
 }
 
 /// Fails when a local backend's root is missing or is not a directory.
+///
 /// The wizard never creates it: a typo would otherwise silently open an
 /// empty mailbox.
 #[cfg(feature = "maildir")]

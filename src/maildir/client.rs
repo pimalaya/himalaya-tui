@@ -1,8 +1,8 @@
-//! Himalaya TUI wrapper around [`io_maildir::client::MaildirClient`].
+//! # Maildir client
 //!
-//! Built from the per-account [`MaildirConfig`] block and handed to the
-//! shared cross-protocol client. The configured filesystem root is kept
-//! on the wrapper so commands can join per-mailbox sub-paths.
+//! Himalaya TUI wrapper around [`io_maildir::client::MaildirClient`],
+//! built from the per-account [`MaildirConfig`] block and handed to the
+//! shared cross-protocol client.
 
 use std::{
     ops::{Deref, DerefMut},
@@ -17,9 +17,8 @@ use crate::config::MaildirConfig;
 /// Live Maildir client wrapping io_maildir with the configured root.
 pub struct MaildirClient {
     inner: Inner,
-    /// Filesystem root of the configured maildir. Kept on the wrapper
-    /// so commands can join sub-paths (per-mailbox) without needing the
-    /// original [`MaildirConfig`].
+    /// Filesystem root of the configured maildir, kept so commands can
+    /// join per-mailbox sub-paths without the original [`MaildirConfig`].
     pub root: PathBuf,
 }
 
@@ -31,10 +30,11 @@ impl MaildirClient {
         Self { inner, root }
     }
 
-    /// Resolves a maildir CLI argument: tries `path` as-is first, then
-    /// falls back to `self.root.join(path)`. Both attempts go through
-    /// [`io_maildir::client::MaildirClient::load_maildir`] so the `cur`
-    /// / `new` / `tmp` markers are validated.
+    /// Resolves a maildir argument: `path` as-is, then `root/path`.
+    ///
+    /// Both attempts go through
+    /// [`io_maildir::client::MaildirClient::load_maildir`], so the cur,
+    /// new and tmp markers are validated.
     pub fn resolve_maildir(&self, path: &Path) -> Result<Maildir> {
         if let Ok(maildir) = self.load_maildir(path.to_string_lossy().into_owned()) {
             return Ok(maildir);

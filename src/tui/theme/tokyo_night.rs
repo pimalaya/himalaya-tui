@@ -1,7 +1,7 @@
-//! Tokyo Night (Night), a 24-bit RGB palette.
-//! bg=#1a1b26, line-bg=#292e42, fg=#c0caf5, comment=#565f89,
-//! cyan=#7dcfff, blue=#7aa2f7, purple=#bb9af7, green=#9ece6a,
-//! red=#f7768e, orange=#e0af68
+//! # Tokyo Night theme
+//!
+//! Dark theme built from the 24-bit RGB Tokyo Night palette, Night
+//! variant.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -15,6 +15,7 @@ const CYAN: Color = Color::Rgb(0x7d, 0xcf, 0xff);
 const BLUE: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
 const ORANGE: Color = Color::Rgb(0xe0, 0xaf, 0x68);
 
+/// Theme built from the Tokyo Night palette.
 pub const THEME: Theme = Theme {
     header: Style::new().bg(BLUE).fg(BG).add_modifier(Modifier::BOLD),
     status_bar: Style::new().bg(LINE_BG).fg(FG),
