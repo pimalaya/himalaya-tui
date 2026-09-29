@@ -26,11 +26,11 @@ use io_sasl::{
 };
 use pimalaya_config::{
     secret::{Secret, SecretResolver},
-    toml::{TomlConfig, shell_expanded_string},
+    toml::{TomlConfig, shell_expanded_path, shell_expanded_string},
 };
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use ratatui::style::{Color, Modifier, Style};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
 use crate::tui::{
@@ -44,6 +44,17 @@ use crate::tui::{
 /// carries only what the user chose.
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
+}
+
+/// Optional flavor of [`shell_expanded_path`], for a path field that
+/// may be omitted.
+///
+/// Pair it with `default`, an absent key never reaching a deserializer.
+///
+/// TODO: drop this once pimalaya-config ships its own
+/// `toml::opt_shell_expanded_path`.
+fn opt_shell_expanded_path<'de, D: Deserializer<'de>>(de: D) -> Result<Option<PathBuf>, D::Error> {
+    shell_expanded_path(de).map(Some)
 }
 
 /// The whole TOML document.
@@ -60,7 +71,6 @@ pub struct Config {
     pub signature: Option<String>,
     /// Fallback for [`AccountConfig::signature_delim`].
     pub signature_delim: Option<String>,
-    pub downloads_dir: Option<PathBuf>,
     /// Composer keybinding flavor, Vim when omitted and overridden by
     /// the `--keybinds` flag.
     pub keybinds: Option<Keybinds>,
@@ -279,7 +289,6 @@ pub struct AccountConfig {
     /// Written verbatim, so a value meant to stand on its own line
     /// carries its own trailing newline.
     pub signature_delim: Option<String>,
-    pub downloads_dir: Option<PathBuf>,
     /// Mailbox aliases mapping a friendly name to a backend-native id.
     ///
     /// Written for the himalaya CLI, which needs them to address a
@@ -549,8 +558,11 @@ pub enum JmapAuthConfig {
 pub struct MaildirConfig {
     /// Filesystem root holding the per-account Maildir tree.
     ///
-    /// The directory must already exist, the wizard never creating it.
-    /// Each child mailbox is a Maildir, with its `cur`, `new` and `tmp`.
+    /// Shell-expanded on load, so `~/Mail` names the same directory it
+    /// does in a shell. It must already exist, the wizard never creating
+    /// it, and each child mailbox is a Maildir with its `cur`, `new` and
+    /// `tmp`.
+    #[serde(deserialize_with = "shell_expanded_path")]
     pub root: PathBuf,
 }
 
@@ -561,7 +573,9 @@ pub struct TlsConfig {
     pub provider: Option<TlsProviderConfig>,
     #[serde(default)]
     pub rustls: RustlsConfig,
-    /// Extra root certificate trusted on top of the system store.
+    /// Extra root certificate trusted on top of the system store,
+    /// shell-expanded on load.
+    #[serde(default, deserialize_with = "opt_shell_expanded_path")]
     pub cert: Option<PathBuf>,
 }
 
@@ -853,6 +867,45 @@ mod tests {
             account.maildir.unwrap().root,
             PathBuf::from("/tmp/mail"),
             "the modelled backend survives the blocks around it",
+        );
+    }
+
+    /// A path field is expanded where it is deserialized, so no call
+    /// site can forget: unexpanded, `~/Mail` names a literal directory
+    /// called `~` under the working directory, and the Maildir client
+    /// opens exactly what the field holds.
+    #[test]
+    #[cfg(unix)]
+    fn a_shell_path_is_expanded_on_load() {
+        use std::env;
+
+        let home = env::var("HOME").expect("HOME must be set");
+
+        let toml = r#"
+            [accounts.example]
+            maildir.root = "~/Mail"
+
+            imap.server = "example.com"
+            imap.tls.cert = "~/ca.pem"
+
+            smtp.server = "example.com"
+        "#;
+
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let account = config.accounts.remove("example").unwrap();
+
+        assert_eq!(
+            account.maildir.unwrap().root,
+            PathBuf::from(format!("{home}/Mail")),
+        );
+        assert_eq!(
+            account.imap.unwrap().tls.cert,
+            Some(PathBuf::from(format!("{home}/ca.pem"))),
+        );
+        assert_eq!(
+            account.smtp.unwrap().tls.cert,
+            None,
+            "an omitted path stays unset rather than expanding to the home",
         );
     }
 

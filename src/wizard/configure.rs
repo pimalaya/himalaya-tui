@@ -10,8 +10,14 @@
 //!
 //! Appending is a plain text append rather than a re-serialization, so
 //! comments, ordering and hand-written formatting come out untouched.
+//! Two rules guard it, and they are the CLI's: the account name has to
+//! be free, two tables of one name making the whole document fail to
+//! parse, and the new account claims the default only when no other one
+//! does. Both are properties of the accounts table the two binaries
+//! share, so the block written here is one himalaya reads unchanged.
 
 use std::{
+    fmt,
     fs::{self, OpenOptions},
     io::{IsTerminal, Write, stdin},
     path::{Path, PathBuf},
@@ -27,6 +33,12 @@ use crate::{
 };
 
 /// Runs the wizard and hands back the account to open, with its name.
+///
+/// The CLI's `ConfigureCommand::execute` step for step, save for two
+/// deviations the interface needs. It is a function rather than a
+/// subcommand, there being no `configure` to type, and it returns the
+/// account instead of ending on a document, so the session opens on
+/// what was just discovered.
 ///
 /// `seed` answers the first prompt outright, which is what the
 /// positional argument is for. The account is offered to the
@@ -45,13 +57,27 @@ pub fn run(seed: Option<&str>, config_paths: &[PathBuf]) -> Result<(String, Acco
     let (base_name, mut account) = discover::run(seed)?;
     let name = account_name(&base_name, existing.as_ref());
 
-    // NOTE: a second `default = true` would make the account the CLI
-    // picks depend on map ordering.
-    account.default = !existing.as_ref().is_some_and(|config| config.has_default);
+    // NOTE: a second `default = true` would make the account both
+    // binaries pick depend on map ordering, so the generated one claims
+    // the default only when no other account does.
+    let default = !existing.as_ref().is_some_and(|config| config.has_default);
+    account.default = default;
 
-    offer_to_save(&path, existing.is_some(), &name, &account)?;
+    let generated = GeneratedConfig {
+        document: account.render(&name)?,
+        name,
+        default,
+    };
 
-    Ok((name, account))
+    // NOTE: no stdout branch here, unlike the CLI's: the interface takes
+    // the terminal over the moment this returns, so there is no document
+    // to redirect and nothing that would read it.
+    match existing {
+        Some(_) => append_or_skip(&path, &generated)?,
+        None => save_or_skip(&path, &generated)?,
+    }
+
+    Ok((generated.name, account))
 }
 
 /// Introduces himalaya-tui and names the configuration file missing at
@@ -112,6 +138,28 @@ impl ExistingConfig {
     }
 }
 
+/// The generated account, as the offer to file it takes it.
+///
+/// The CLI's `ConfigureOutput` without its `Serialize` and `JsonSchema`
+/// derives, and named for what it is here: nothing prints this
+/// document, it only ever reaches a file.
+struct GeneratedConfig {
+    /// The account name, which is the `[accounts.<name>]` table key.
+    name: String,
+    /// Whether the account claims the default.
+    default: bool,
+    /// The rendered TOML document.
+    document: String,
+}
+
+impl fmt::Display for GeneratedConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // NOTE: the trailing newline terminates the document, whichever
+        // shape the renderer left it in.
+        writeln!(f, "{}", self.document.trim_end())
+    }
+}
+
 /// The name discovery proposes, suffixed until it is free.
 ///
 /// Not prompted, the name being only the TOML table key. It still has
@@ -139,37 +187,19 @@ fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
     }
 }
 
-/// Offers to write the generated account to the configuration file.
+/// Offers to write the generated account to a configuration file that
+/// does not exist yet, writing nothing when the offer is declined.
 ///
-/// Creates the file or appends to the one already there. Declining
-/// writes nothing and says nothing: the account is opened all the same.
-fn offer_to_save(path: &Path, exists: bool, name: &str, account: &AccountConfig) -> Result<()> {
-    let prompt = if exists {
-        format!("Append account `{name}` to {}?", path.display())
-    } else {
-        format!("Save this account to {}?", path.display())
-    };
+/// The CLI's `save_or_print` minus the print: a declined offer leaves
+/// the account unfiled rather than on stdout, the interface opening on
+/// it for this session alone.
+fn save_or_skip(path: &Path, config: &GeneratedConfig) -> Result<()> {
+    let prompt = format!("Save this account to {}?", path.display());
 
     if !prompt::bool(prompt, true)? {
         return Ok(());
     }
 
-    let document = account.render(name)?;
-
-    if exists {
-        append(path, &document)?;
-    } else {
-        save(path, &document)?;
-    }
-
-    print_saved(path, name, account.default);
-
-    Ok(())
-}
-
-/// Writes the account as a new configuration file, creating its
-/// directory.
-fn save(path: &Path, document: &str) -> Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -178,33 +208,56 @@ fn save(path: &Path, document: &str) -> Result<()> {
             .with_context(|| format!("Create the config directory {}", parent.display()))?;
     }
 
-    fs::write(path, document).with_context(|| format!("Write the config file {}", path.display()))
+    fs::write(path, config.to_string())
+        .with_context(|| format!("Write the config file {}", path.display()))?;
+
+    print_saved(path, config);
+
+    Ok(())
 }
 
-/// Appends the account to the configuration file already there.
-fn append(path: &Path, document: &str) -> Result<()> {
+/// Offers to append the generated account to the configuration file
+/// already there, writing nothing when the offer is declined.
+///
+/// The CLI's `append_or_print` minus the print, as [`save_or_skip`] is.
+fn append_or_skip(path: &Path, config: &GeneratedConfig) -> Result<()> {
+    let prompt = format!("Append account `{}` to {}?", config.name, path.display());
+
+    if !prompt::bool(prompt, true)? {
+        return Ok(());
+    }
+
     let mut file = OpenOptions::new()
         .append(true)
         .open(path)
         .with_context(|| format!("Open the config file {}", path.display()))?;
 
-    // NOTE: the leading newline separates the two tables, and terminates
-    // the last line when the file ends without one.
-    write!(file, "\n{}", document.trim_end())
+    // NOTE: appending text keeps every comment and hand-written line as
+    // they are, which re-serializing the document would not. The leading
+    // newline separates the two tables, and terminates the last line of a
+    // file that ends without one.
+    write!(file, "\n{config}")
         .with_context(|| format!("Append to the config file {}", path.display()))?;
 
-    writeln!(file).with_context(|| format!("Append to the config file {}", path.display()))
+    print_saved(path, config);
+
+    Ok(())
 }
 
 /// Tells where the account landed and under which name.
 ///
 /// The name matters here because it was never asked for: an account
 /// that did not claim the default is only reachable through `-a`.
-fn print_saved(path: &Path, name: &str, default: bool) {
+///
+/// Nothing to run closes it, unlike the CLI's: the interface opens on
+/// this account the moment the wizard returns.
+fn print_saved(path: &Path, config: &GeneratedConfig) {
+    let name = &config.name;
+
     eprintln!();
     eprintln!("Account `{name}` saved to {}.", path.display());
 
-    if !default {
+    if !config.default {
         eprintln!("Another account holds the default, so name this one with `-a {name}`.");
     }
 }
@@ -299,7 +352,9 @@ mod tests {
         let document = account(!existing.has_default)
             .render("perso")
             .expect("render the account");
-        append(&path, &document).expect("append the generated account");
+        let mut file = OpenOptions::new().append(true).open(&path).expect("open");
+        write!(file, "\n{document}").expect("append the generated account");
+        drop(file);
 
         let content = fs::read_to_string(&path).expect("read back");
         let config: Config = toml::from_str(&content).expect("parse the appended config");

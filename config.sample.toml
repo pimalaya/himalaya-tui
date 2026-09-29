@@ -39,9 +39,6 @@
 # meant to stand on its own line carries its own trailing newline.
 #signature-delim = "-- \n"
 
-# Default download directory for attachments. Falls back to `$TMPDIR`.
-#downloads-dir = "~/downloads"
-
 # Composer keybinding flavor: `vim` (default) or `emacs`, overridden by the
 # `--keybinds` flag. It drives edtui's own bindings and the event loop's
 # intercepts, notably `Ctrl-e`, which collides with Emacs' end of line.
@@ -165,7 +162,6 @@ default = true
 # Per-account overrides for the global options above.
 #signature = "Best,\nExample User"
 #signature-delim = "-- \n"
-#downloads-dir = "~/downloads/example"
 
 # Mailbox aliases mapping a friendly name to a backend-native id, written by
 # the wizard from what the server reported. Read by the himalaya CLI, which
@@ -197,7 +193,7 @@ imap.server = "example.com"
 #imap.tls.rustls.crypto = "ring"
 #imap.tls.rustls.crypto = "aws"
 
-# Custom TLS certificate (extra root, PEM-encoded).
+# Custom TLS certificate (extra root, PEM-encoded), shell-expanded.
 #imap.tls.cert = "/path/to/custom/cert.pem"
 
 # Enable STARTTLS (only valid when the server resolves to `imap://`).
@@ -319,6 +315,7 @@ imap.sasl.plain.password.raw = "***"
 # --------------------------------------------------------------------------------
 
 # Root directory containing one subdirectory per mailbox (Maildir++ layout).
+# Shell-expanded, so a leading `~` and any `$VAR` name what they do in a shell.
 #maildir.root = "~/Mail/example"
 
 # --------------------------------------------------------------------------------
@@ -348,7 +345,7 @@ smtp.server = "example.com"
 #smtp.tls.rustls.crypto = "ring"
 #smtp.tls.rustls.crypto = "aws"
 
-# Custom TLS certificate (extra root, PEM-encoded).
+# Custom TLS certificate (extra root, PEM-encoded), shell-expanded.
 #smtp.tls.cert = "/path/to/custom/cert.pem"
 
 # Enable STARTTLS (only valid when the server resolves to `smtp://`).

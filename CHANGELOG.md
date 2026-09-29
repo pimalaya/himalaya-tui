@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   The SMTP transport connects on the first send rather than at startup, and Maildir flags carry the custom keywords named by the `dovecot-keywords` sidecar or by the keywords header.
 
+  Path fields are shell-expanded as the file is read, so `maildir.root = "~/Mail"` and `imap.tls.cert = "$CERTS/ca.pem"` name what they would in a shell rather than a literal directory called `~` under the working directory.
+
 - Added the anonymous, login, plain, oauthbearer, xoauth2 and scram-sha-256 SASL mechanisms, plus basic and bearer HTTP authentication for JMAP.
 
   A credential command named by more than one block of an account is spawned once per resolution rather than once per block, so a `pass` or `gpg` entry backing both IMAP and SMTP unlocks once where the wizard used to ask for it twice.
