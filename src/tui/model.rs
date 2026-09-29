@@ -86,6 +86,9 @@ pub struct Model {
     pub signature: String,
     /// Transient message shown in the status bar.
     pub status_message: Option<String>,
+    /// Blocking action run on the next frame, once the status announcing
+    /// it is drawn.
+    pub deferred: Option<Message>,
     /// Sub-modality of the bottom pane.
     pub bottom_panel: BottomPanel,
     /// Body of the message being read, once fetched.
@@ -490,4 +493,33 @@ pub enum Message {
     SaveComposeToDrafts,
     /// Discard the compose buffer.
     CancelCompose,
+    /// Run a blocking action announced on the previous frame.
+    Run(Blocking),
+}
+
+/// An action blocking the loop, announced one frame before it runs.
+///
+/// Carries only what the model does not hold: the selection and the
+/// dialog it reads stay put between the two frames, no key being
+/// handled in between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blocking {
+    /// Fetch the current envelope page and land the cursor.
+    LoadEnvelopes(EnvelopeLanding),
+    /// Fetch the selected message and show it.
+    Read,
+    /// Fetch the selected message and reply to it.
+    Reply { reply_all: bool },
+    /// Fetch the selected message and forward it.
+    Forward,
+    /// Copy the selected message to the picked mailbox.
+    Copy,
+    /// Move the selected message to the picked mailbox.
+    Move,
+    /// Add or remove the picked flag on the selected message.
+    Flag { add: bool },
+    /// Compile and send the compose buffer.
+    Send,
+    /// Save the compose buffer to the drafts mailbox.
+    SaveDraft,
 }

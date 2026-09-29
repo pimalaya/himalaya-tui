@@ -57,6 +57,14 @@ pub fn run(mut model: Model) -> Result<()> {
 
         terminal.draw(|f| view::render(&mut model, f))?;
 
+        // NOTE: run once the status announcing it is on screen, then
+        // straight back to drawing its outcome rather than waiting for
+        // a key.
+        if let Some(deferred) = model.deferred.take() {
+            update::apply_all(&mut model, Some(deferred));
+            continue;
+        }
+
         // A page is one screenful, so the render that measured the screen
         // decides its size: the first render, and every one after a
         // resize, re-pages the list around the cursor.

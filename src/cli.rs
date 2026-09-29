@@ -236,6 +236,7 @@ impl Cli {
             from_name,
             signature,
             status_message: None,
+            deferred: None,
             bottom_panel: BottomPanel::None,
             message_content: None,
             message_scroll: 0,

@@ -32,8 +32,8 @@ use crate::{
         mailbox::Mailbox,
     },
     tui::model::{
-        BottomPanel, ComposeAction, ContactCompletion, Dialog, EnvelopeAction, EnvelopeLanding,
-        FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
+        Blocking, BottomPanel, ComposeAction, ContactCompletion, Dialog, EnvelopeAction,
+        EnvelopeLanding, FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
     },
 };
 
@@ -161,51 +161,81 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::DialogConfirm => dialog_confirm(model),
 
         Message::LoadMailboxes => load_mailboxes(model),
-        Message::LoadEnvelopes(landing) => {
-            load_envelopes(model, landing);
-            None
-        }
-        Message::ReadSelected => {
-            read_selected(model);
-            None
-        }
+        Message::LoadEnvelopes(landing) => announce(model, Blocking::LoadEnvelopes(landing)),
+        Message::ReadSelected => announce(model, Blocking::Read),
         Message::StartReplyToSelected { reply_all } => {
-            fetch_for_reply(model, reply_all);
-            None
+            announce(model, Blocking::Reply { reply_all })
         }
-        Message::StartForwardSelected => {
-            fetch_for_forward(model);
-            None
-        }
-        Message::CopySelectedToTarget => {
-            do_copy(model);
-            None
-        }
-        Message::MoveSelectedToTarget => {
-            do_move(model);
-            None
-        }
-        Message::FlagSelected { add } => {
-            do_flag(model, add);
-            None
-        }
-        Message::SendCompose => {
-            do_send(model);
-            None
-        }
+        Message::StartForwardSelected => announce(model, Blocking::Forward),
+        Message::CopySelectedToTarget => announce(model, Blocking::Copy),
+        Message::MoveSelectedToTarget => announce(model, Blocking::Move),
+        Message::FlagSelected { add } => announce(model, Blocking::Flag { add }),
+        Message::SendCompose => announce(model, Blocking::Send),
         Message::PreviewCompose => {
             do_preview(model);
             None
         }
-        Message::SaveComposeToDrafts => {
-            do_save_draft(model);
-            None
-        }
+        Message::SaveComposeToDrafts => announce(model, Blocking::SaveDraft),
         Message::CancelCompose => {
             cancel_compose(model);
             None
         }
+        Message::Run(blocking) => {
+            // NOTE: the announcing status was drawn already, and nothing
+            // draws while the action blocks, so it goes now: an outcome
+            // that sets none must not leave it behind.
+            model.status_message = None;
+
+            match blocking {
+                Blocking::LoadEnvelopes(landing) => load_envelopes(model, landing),
+                Blocking::Read => read_selected(model),
+                Blocking::Reply { reply_all } => fetch_for_reply(model, reply_all),
+                Blocking::Forward => fetch_for_forward(model),
+                Blocking::Copy => do_copy(model),
+                Blocking::Move => do_move(model),
+                Blocking::Flag { add } => do_flag(model, add),
+                Blocking::Send => do_send(model),
+                Blocking::SaveDraft => do_save_draft(model),
+            }
+
+            None
+        }
     }
+}
+
+/// Shows the status of a blocking action and defers it to the next
+/// frame, the loop being unable to draw while it runs.
+fn announce(model: &mut Model, blocking: Blocking) -> Option<Message> {
+    let status = match blocking {
+        Blocking::LoadEnvelopes(_) => model
+            .selected_mailbox_name()
+            .map(|name| format!("Loading envelopes from {name}…")),
+        Blocking::Read | Blocking::Reply { .. } | Blocking::Forward => model
+            .selected_envelope()
+            .map(|envelope| format!("Loading message {}…", envelope.id)),
+        Blocking::Copy => model
+            .filtered_mailboxes()
+            .get(model.dialog_index)
+            .map(|target| format!("Copying to {}…", target.name)),
+        Blocking::Move => model
+            .filtered_mailboxes()
+            .get(model.dialog_index)
+            .map(|target| format!("Moving to {}…", target.name)),
+        Blocking::Flag { add } => {
+            let verb = if add { "Adding" } else { "Removing" };
+            let label = model.selected_flag_action().label();
+            Some(format!("{verb} flag {label}…"))
+        }
+        Blocking::Send => Some(String::from("Sending message…")),
+        Blocking::SaveDraft => Some(String::from("Saving to Drafts…")),
+    };
+
+    if let Some(status) = status {
+        set_status(model, status);
+    }
+
+    model.deferred = Some(Message::Run(blocking));
+    None
 }
 
 fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
@@ -525,7 +555,6 @@ fn select_mailbox(model: &mut Model) {
     model.envelopes.clear();
     close_bottom_panel(model);
     model.active_panel = Panel::Envelopes;
-    model.status_message = Some(format!("Loading envelopes from {}…", m.name));
 }
 
 fn unselect_mailbox(model: &mut Model) {
@@ -877,7 +906,6 @@ fn read_selected(model: &mut Model) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
-    set_status(model, format!("Loading message {}…", envelope.id));
 
     let result = model.client.get_message(&mailbox, &envelope.id);
     match result {
@@ -896,7 +924,6 @@ fn fetch_for_reply(model: &mut Model, reply_all: bool) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
-    set_status(model, format!("Loading message {}…", envelope.id));
 
     let result = model.client.get_message(&mailbox, &envelope.id);
     match result {
@@ -912,7 +939,6 @@ fn fetch_for_forward(model: &mut Model) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
-    set_status(model, format!("Loading message {}…", envelope.id));
 
     let result = model.client.get_message(&mailbox, &envelope.id);
     match result {
@@ -935,7 +961,6 @@ fn do_copy(model: &mut Model) {
         return;
     };
 
-    set_status(model, format!("Copying to {}…", target.name));
     let result = model
         .client
         .copy_messages(&mailbox, &target.id, &[&envelope.id]);
@@ -959,7 +984,6 @@ fn do_move(model: &mut Model) {
         return;
     };
 
-    set_status(model, format!("Moving to {}…", target.name));
     let result = model
         .client
         .move_messages(&mailbox, &target.id, &[&envelope.id]);
@@ -985,8 +1009,6 @@ fn do_flag(model: &mut Model, add: bool) {
 
     let flag = action.flag();
     let label = action.label();
-    let verb = if add { "Adding" } else { "Removing" };
-    set_status(model, format!("{verb} flag {label}…"));
 
     let op = if add { FlagOp::Add } else { FlagOp::Remove };
     let result = model
@@ -1008,7 +1030,6 @@ fn do_flag(model: &mut Model, add: bool) {
 
 fn do_send(model: &mut Model) {
     let content = model.compose_content();
-    set_status(model, "Compiling message…");
     let mime_bytes = match MmlCompileOptions::default().compile(&content) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -1017,7 +1038,6 @@ fn do_send(model: &mut Model) {
         }
     };
 
-    set_status(model, "Sending message…");
     let result = model.client.send_message(mime_bytes);
     match result {
         Ok(()) => {
@@ -1056,8 +1076,6 @@ fn do_save_draft(model: &mut Model) {
         .replace("\r\n", "\n")
         .replace('\n', "\r\n")
         .into_bytes();
-
-    set_status(model, "Saving to Drafts…");
 
     let result = model
         .client
