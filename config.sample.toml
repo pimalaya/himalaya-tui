@@ -44,6 +44,17 @@
 # intercepts, notably `Ctrl-e`, which collides with Emacs' end of line.
 #keybinds = "vim"
 
+# Command answering the contacts matching a recipient fragment, one per line as
+# `address<TAB>name` (aerc format). `%s` is replaced by the shell-quoted
+# fragment, and without it the fragment is appended. Exit 1 with no output
+# means no match. Overridable per account.
+#contact-command = "khard email --parsable --remove-first-line %s"
+
+# Key completing the recipient under the cursor in a To, Cc, Bcc or Reply-To
+# header, elsewhere reaching the editor as usual. Modifiers: `ctrl-`, `alt-`,
+# `shift-`.
+#contact-complete-key = "tab"
+
 # --------------------------------------------------------------------------------
 # Theme
 # --------------------------------------------------------------------------------
@@ -162,6 +173,7 @@ default = true
 # Per-account overrides for the global options above.
 #signature = "Best,\nExample User"
 #signature-delim = "-- \n"
+#contact-command = ["abook", "--mutt-query", "%s"]
 
 # Mailbox aliases mapping a friendly name to a backend-native id, written by
 # the wizard from what the server reported. Read by the himalaya CLI, which

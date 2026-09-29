@@ -25,6 +25,10 @@ use crate::tui::{
 /// How long an iteration waits for an event before ticking idle.
 const POLL_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// The same wait while a contact command runs, so its answer shows
+/// promptly.
+const LOOKUP_POLL_TIMEOUT: Duration = Duration::from_millis(25);
+
 /// Runs the loop until the model stops running, then restores the
 /// terminal.
 pub fn run(mut model: Model) -> Result<()> {
@@ -47,6 +51,10 @@ pub fn run(mut model: Model) -> Result<()> {
             system_editor::open(&mut model.editor_state, &mut terminal)?;
         }
 
+        if model.contact_lookup.is_some() {
+            update::apply_all(&mut model, Some(Message::PollContactLookup));
+        }
+
         terminal.draw(|f| view::render(&mut model, f))?;
 
         // A page is one screenful, so the render that measured the screen
@@ -55,7 +63,13 @@ pub fn run(mut model: Model) -> Result<()> {
         let repage = update::adopt_envelope_capacity(&mut model);
         update::apply_all(&mut model, repage);
 
-        if !event::poll(POLL_TIMEOUT)? {
+        let timeout = if model.contact_lookup.is_some() {
+            LOOKUP_POLL_TIMEOUT
+        } else {
+            POLL_TIMEOUT
+        };
+
+        if !event::poll(timeout)? {
             if model.last_activity.elapsed() >= PING_INTERVAL {
                 update::apply_all(&mut model, Some(Message::Ping));
             }

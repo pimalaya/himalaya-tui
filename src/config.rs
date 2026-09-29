@@ -25,6 +25,7 @@ use io_sasl::{
     rfc7628::oauthbearer::SaslOauthbearerCreds, xoauth2::SaslXoauth2Creds,
 };
 use pimalaya_config::{
+    command::CommandConfig,
     secret::{Secret, SecretResolver},
     toml::{TomlConfig, shell_expanded_path, shell_expanded_string},
 };
@@ -33,9 +34,12 @@ use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
-use crate::tui::{
-    model::Keybinds,
-    theme::{self, Theme},
+use crate::{
+    contact::ContactCompleteKey,
+    tui::{
+        model::Keybinds,
+        theme::{self, Theme},
+    },
 };
 
 /// `skip_serializing_if` predicate omitting a field left at its default.
@@ -74,6 +78,10 @@ pub struct Config {
     /// Composer keybinding flavor, Vim when omitted and overridden by
     /// the `--keybinds` flag.
     pub keybinds: Option<Keybinds>,
+    /// Fallback for [`AccountConfig::contact_command`].
+    pub contact_command: Option<CommandConfig>,
+    /// Key completing a recipient in the composer, `tab` when omitted.
+    pub contact_complete_key: Option<ContactCompleteKey>,
     /// Color theme, resolved into a [`Theme`] at startup.
     #[serde(default)]
     pub theme: ThemeConfig,
@@ -289,6 +297,12 @@ pub struct AccountConfig {
     /// Written verbatim, so a value meant to stand on its own line
     /// carries its own trailing newline.
     pub signature_delim: Option<String>,
+    /// Command answering the contacts matching a recipient fragment,
+    /// falling back to [`Config::contact_command`].
+    ///
+    /// Read by the TUI alone, and never written by the wizard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_command: Option<CommandConfig>,
     /// Mailbox aliases mapping a friendly name to a backend-native id.
     ///
     /// Written for the himalaya CLI, which needs them to address a

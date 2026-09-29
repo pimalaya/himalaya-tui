@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use anyhow::{Result, anyhow, bail};
 use io_smtp::{
     client::SmtpClient as _,
+    message::SmtpMessageSendOptions,
     rfc5321::{
         SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
     },
@@ -57,7 +58,12 @@ impl SmtpClient {
         let forward_paths: Vec<SmtpForwardPath<'static>> =
             forwards.into_iter().map(SmtpForwardPath::from).collect();
 
-        self.send(reverse_path, forward_paths, raw)?;
+        self.send(
+            reverse_path,
+            forward_paths,
+            raw,
+            SmtpMessageSendOptions::default(),
+        )?;
         Ok(())
     }
 }

@@ -26,8 +26,8 @@ use crate::{
     },
     tui::{
         model::{
-            BottomPanel, ComposeAction, Dialog, EnvelopeAction, FlagAction, Keybinds,
-            MAILBOX_DIALOG_VISIBLE, Model, Panel,
+            BottomPanel, CONTACT_LIST_VISIBLE, ComposeAction, Dialog, EnvelopeAction, FlagAction,
+            Keybinds, MAILBOX_DIALOG_VISIBLE, Model, Panel,
         },
         theme::Theme,
     },
@@ -383,6 +383,54 @@ fn render_compose(frame: &mut Frame, model: &mut Model, area: Rect) {
     EditorView::new(&mut model.editor_state)
         .theme(editor_theme)
         .render(inner, buf);
+
+    render_contact_completion(frame, model, inner);
+}
+
+/// Renders the completion list under the cursor, or above it when the
+/// composer has no room below.
+///
+/// Runs after the editor, whose render is what measures the cursor.
+fn render_contact_completion(frame: &mut Frame, model: &Model, area: Rect) {
+    let Some(completion) = &model.contact_completion else {
+        return;
+    };
+    let Some(cursor) = model.editor_state.cursor_screen_position() else {
+        return;
+    };
+
+    let labels: Vec<String> = completion.contacts.iter().map(|c| c.to_string()).collect();
+    let longest = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+
+    let width = (longest as u16 + 4).min(area.width);
+    let height = (labels.len().min(CONTACT_LIST_VISIBLE) as u16 + 2).min(area.height);
+
+    let below = cursor.y + 1;
+    let y = if below + height <= area.bottom() {
+        below
+    } else {
+        cursor.y.saturating_sub(height).max(area.y)
+    };
+    let x = cursor.x.min(area.right().saturating_sub(width));
+
+    let popup = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(model.theme.dialog_border);
+
+    let items: Vec<ListItem> = labels
+        .into_iter()
+        .map(|label| ListItem::new(label).style(model.theme.message_body))
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(model.theme.cursor);
+
+    let mut state = ListState::default().with_selected(Some(completion.index));
+    frame.render_stateful_widget(list, popup, &mut state);
 }
 
 fn render_dialog_overlay(frame: &mut Frame, model: &Model) {

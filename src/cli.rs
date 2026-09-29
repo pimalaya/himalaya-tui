@@ -165,6 +165,8 @@ impl Cli {
         let mut signature = String::new();
         let mut signature_delim = None;
         let mut keybinds_config = None;
+        let mut contact_command = None;
+        let mut contact_complete_key = None;
         let mut theme = Theme::default();
 
         let mut account = None;
@@ -173,6 +175,8 @@ impl Cli {
             signature = config.signature.take().unwrap_or_default();
             signature_delim = config.signature_delim.take();
             keybinds_config = config.keybinds.take();
+            contact_command = config.contact_command.take();
+            contact_complete_key = config.contact_complete_key.take();
             theme = Theme::resolve(&config.theme);
 
             if !asked_for_wizard {
@@ -208,6 +212,7 @@ impl Cli {
             account_config.signature_delim.take().or(signature_delim),
         );
         let keybinds = self.keybinds.or(keybinds_config);
+        let contact_command = account_config.contact_command.take().or(contact_command);
 
         let client = EmailClient::new(account_config)?;
 
@@ -239,6 +244,10 @@ impl Cli {
             dialog: None,
             dialog_index: 0,
             keybinds,
+            contact_command,
+            contact_complete_key: contact_complete_key.unwrap_or_default(),
+            contact_lookup: None,
+            contact_completion: None,
             theme,
             client,
             last_activity: Instant::now(),

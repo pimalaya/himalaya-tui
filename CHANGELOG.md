@@ -46,6 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `signature` is the signature alone and `signature-delim` decides the separator introducing it, defaulting to the RFC 3676 section 4.3 `"-- \n"` and written verbatim. The block is assembled as the himalaya CLI assembles it, so one value reads the same under both binaries.
 
 - Added the in-app composer, with an `Alt-e` handoff to the system editor. Drafts are written in [MML](https://github.com/pimalaya/mml).
+- Added recipient completion from a `contact-command`, the aerc way, triggered by `contact-complete-key` (`tab` by default) in the `To`, `Cc`, `Bcc` and `Reply-To` headers ([#16]).
+
+  The command runs off the event loop and is killed after 5 seconds. One match is inserted directly, several open a list at the cursor.
 - Added the `default`, `dracula-dark`, `one-light` and `tokyo-night` color presets, plus per-field `[theme.*]` overrides.
 - Added the `-a/--account`, `-c/--config`, `--no-config`, `--from` and `--from-name` flags, the `[EMAIL]` positional argument answering the wizard's first prompt, and the `completion` and `manual` subcommands.
 
@@ -55,3 +58,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added mailbox name resolution to the backend-native id before dispatch, so the composer's `Drafts` target lands on a JMAP account too.
 - Added a 60-second idle ping against the active storage backend, so a long reading session does not lose its connection to a server-side inactivity timeout.
+
+### Fixed
+
+- Fixed the `Bcc` header being transmitted to every recipient over SMTP (RFC 5322 section 3.6.3). It is now removed before sending, as io-smtp 0.4 does by default.
+
+[#16]: https://github.com/pimalaya/himalaya-tui/issues/16

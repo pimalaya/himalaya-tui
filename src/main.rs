@@ -39,6 +39,11 @@
 //! The in-app composer is powered by edtui with a system-editor handoff,
 //! and drafts are written in MML then compiled to MIME on send.
 //!
+//! Recipients complete from a command the user configures, the aerc
+//! way, so the TUI holds no address book: [`contact`] locates the
+//! fragment, runs the command on a thread the loop polls, and formats
+//! the pick as an RFC 5322 mailbox.
+//!
 //! ## Startup
 //!
 //! [`main`] parses the CLI flags, runs any auxiliary subcommand
@@ -55,6 +60,7 @@
 
 mod cli;
 mod config;
+mod contact;
 mod email;
 #[cfg(feature = "imap")]
 mod imap;

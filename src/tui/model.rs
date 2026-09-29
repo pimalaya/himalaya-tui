@@ -8,11 +8,13 @@ use std::time::{Duration, Instant};
 
 use clap::ValueEnum;
 use edtui::{EditorEventHandler, EditorState};
+use pimalaya_config::command::CommandConfig;
 use ratatui::crossterm::event::KeyEvent;
 use serde::{Deserialize, Serialize};
 use tui_input::Input;
 
 use crate::{
+    contact::{Contact, ContactCompleteKey, ContactLookup, ContactTarget},
     email::{
         envelope::Envelope,
         flag::{Flag, IanaFlag},
@@ -34,6 +36,9 @@ pub const MAILBOX_DIALOG_VISIBLE: usize = 10;
 /// behind corporate NAT and cloud firewalls) so the connection stays
 /// warm during long reading sessions.
 pub const PING_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Contact rows visible at once in the completion list.
+pub const CONTACT_LIST_VISIBLE: usize = 8;
 
 /// Every piece of TUI state, including the email client.
 pub struct Model {
@@ -100,6 +105,14 @@ pub struct Model {
     /// Affects only the in-composer edtui handler: top-level navigation
     /// always recognises both Vim and Emacs aliases.
     pub keybinds: Option<Keybinds>,
+    /// Command answering the contacts matching a recipient fragment.
+    pub contact_command: Option<CommandConfig>,
+    /// Key completing the recipient under the cursor.
+    pub contact_complete_key: ContactCompleteKey,
+    /// Contact command running, if any.
+    pub contact_lookup: Option<ContactLookup>,
+    /// Completion list open over the composer, if any.
+    pub contact_completion: Option<ContactCompletion>,
     /// Resolved colors every render function reads.
     pub theme: Theme,
     /// Backend client every network action goes through.
@@ -368,6 +381,17 @@ impl Keybinds {
     }
 }
 
+/// Contacts a lookup answered, listed at the cursor for a pick.
+#[derive(Debug, Clone)]
+pub struct ContactCompletion {
+    /// Where in the buffer the pick goes.
+    pub target: ContactTarget,
+    /// Contacts the command answered, two or more.
+    pub contacts: Vec<Contact>,
+    /// Index of the highlighted contact.
+    pub index: usize,
+}
+
 /// Which end of a freshly loaded page the selection lands on.
 ///
 /// A page reached by moving down is entered from its top, one reached
@@ -418,6 +442,18 @@ pub enum Message {
     EditorKey(KeyEvent),
     /// Hand the compose buffer over to the system editor.
     OpenSystemEditor,
+    /// Run the contact command on the fragment under the cursor.
+    CompleteContact(ContactTarget),
+    /// Collect the contact command's answer, if it has one.
+    PollContactLookup,
+    /// Highlight the next contact of the completion list.
+    ContactCompletionNext,
+    /// Highlight the previous contact of the completion list.
+    ContactCompletionPrevious,
+    /// Insert the highlighted contact.
+    ContactCompletionAccept,
+    /// Close the completion list, handing the key back for translation.
+    ContactCompletionDismiss(Option<KeyEvent>),
     /// A key press routed to the mailbox filter input.
     MailboxFilterKey(KeyEvent),
     /// Move the dialog cursor down.

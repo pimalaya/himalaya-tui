@@ -12,7 +12,7 @@ use std::{slice, time::Instant};
 use anyhow::{Result, bail};
 use edtui::{
     EditorMode, EditorState, Index2, Lines,
-    actions::{Execute, OpenSystemEditor},
+    actions::{DeleteChar, Execute, InsertChar, OpenSystemEditor},
 };
 use mail_parser::MessageParser;
 use mml::{
@@ -26,13 +26,14 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui_input::InputRequest;
 
 use crate::{
+    contact::{Contact, ContactLookup, ContactTarget},
     email::{
         flag::{Flag, FlagOp, IanaFlag},
         mailbox::Mailbox,
     },
     tui::model::{
-        BottomPanel, ComposeAction, Dialog, EnvelopeAction, EnvelopeLanding, FlagAction,
-        MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
+        BottomPanel, ComposeAction, ContactCompletion, Dialog, EnvelopeAction, EnvelopeLanding,
+        FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
     },
 };
 
@@ -115,6 +116,31 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
             None
         }
 
+        Message::CompleteContact(target) => {
+            complete_contact(model, target);
+            None
+        }
+        Message::PollContactLookup => {
+            poll_contact_lookup(model);
+            None
+        }
+        Message::ContactCompletionNext => {
+            contact_completion_next(model);
+            None
+        }
+        Message::ContactCompletionPrevious => {
+            contact_completion_previous(model);
+            None
+        }
+        Message::ContactCompletionAccept => {
+            contact_completion_accept(model);
+            None
+        }
+        Message::ContactCompletionDismiss(key) => {
+            model.contact_completion = None;
+            key.map(Message::Key)
+        }
+
         Message::MailboxFilterKey(key) => {
             mailbox_filter_input(model, key);
             None
@@ -187,6 +213,15 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
     // so apply can dispatch on model state: in the composer it opens the
     // compose dialog rather than quitting.
     if model.dialog.is_none() && model.active_panel == Panel::Compose {
+        if model.contact_completion.is_some() {
+            return Some(translate_completion_key(model, key));
+        }
+        if model.contact_complete_key.matches(&key)
+            && model.editor_state.mode == EditorMode::Insert
+            && let Some(target) = contact_target(model)
+        {
+            return Some(Message::CompleteContact(target));
+        }
         if key.code == KeyCode::Esc {
             return Some(Message::Esc);
         }
@@ -247,6 +282,122 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         KeyCode::PageUp => Some(Message::PageUp),
         KeyCode::Enter => Some(Message::Enter),
         _ => None,
+    }
+}
+
+/// Keys while the completion list is open: it navigates, accepts or
+/// closes, and any other key closes it and reaches the composer.
+fn translate_completion_key(model: &Model, key: KeyEvent) -> Message {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    match key.code {
+        KeyCode::Down => Message::ContactCompletionNext,
+        KeyCode::Char('n') if ctrl => Message::ContactCompletionNext,
+        KeyCode::Up => Message::ContactCompletionPrevious,
+        KeyCode::Char('p') if ctrl => Message::ContactCompletionPrevious,
+        KeyCode::Enter => Message::ContactCompletionAccept,
+        KeyCode::Esc => Message::ContactCompletionDismiss(None),
+        _ if model.contact_complete_key.matches(&key) => Message::ContactCompletionNext,
+        _ => Message::ContactCompletionDismiss(Some(key)),
+    }
+}
+
+/// The recipient fragment under the composer cursor, if it completes.
+fn contact_target(model: &Model) -> Option<ContactTarget> {
+    let lines = model.editor_state.lines.to_vecs();
+    let cursor = model.editor_state.cursor;
+    ContactTarget::locate(&lines, cursor.row, cursor.col)
+}
+
+fn complete_contact(model: &mut Model, target: ContactTarget) {
+    let Some(command) = &model.contact_command else {
+        set_status(
+            model,
+            "No contact command configured, see `contact-command` in config.sample.toml",
+        );
+        return;
+    };
+
+    let status = format!("Searching contacts for `{}`", target.query);
+    model.contact_lookup = Some(ContactLookup::spawn(command, target));
+    set_status(model, status);
+}
+
+/// Collects the lookup's answer, dropped when the buffer moved on.
+fn poll_contact_lookup(model: &mut Model) {
+    let Some(lookup) = &model.contact_lookup else {
+        return;
+    };
+    let Some(result) = lookup.try_result() else {
+        return;
+    };
+    let Some(lookup) = model.contact_lookup.take() else {
+        return;
+    };
+
+    model.status_message = None;
+
+    if contact_target(model).as_ref() != Some(&lookup.target) {
+        return;
+    }
+
+    let mut contacts = match result {
+        Ok(contacts) => contacts,
+        Err(err) => return set_status(model, format!("Error: {err}")),
+    };
+
+    match contacts.len() {
+        0 => set_status(
+            model,
+            format!("No contact matches `{}`", lookup.target.query),
+        ),
+        1 => insert_contact(model, &lookup.target, &contacts.remove(0)),
+        _ => {
+            model.contact_completion = Some(ContactCompletion {
+                target: lookup.target,
+                contacts,
+                index: 0,
+            })
+        }
+    }
+}
+
+fn contact_completion_next(model: &mut Model) {
+    if let Some(completion) = &mut model.contact_completion {
+        completion.index = (completion.index + 1) % completion.contacts.len();
+    }
+}
+
+fn contact_completion_previous(model: &mut Model) {
+    if let Some(completion) = &mut model.contact_completion {
+        let len = completion.contacts.len();
+        completion.index = (completion.index + len - 1) % len;
+    }
+}
+
+fn contact_completion_accept(model: &mut Model) {
+    let Some(completion) = model.contact_completion.take() else {
+        return;
+    };
+
+    let contact = &completion.contacts[completion.index];
+    insert_contact(model, &completion.target, contact);
+}
+
+/// Replaces the fragment with the contact's mailbox.
+///
+/// Goes through edtui's own actions, so undo sees one change.
+fn insert_contact(model: &mut Model, target: &ContactTarget, contact: &Contact) {
+    let state = &mut model.editor_state;
+    state.cursor = Index2::new(target.row, target.end);
+
+    let len = target.end - target.start;
+    if len > 0 {
+        state.execute(DeleteChar(len));
+    }
+
+    for c in contact.to_string().chars() {
+        state.execute(InsertChar(c));
     }
 }
 
@@ -654,6 +805,8 @@ fn open_editor_with_template(model: &mut Model, content: &str, cursor: &MmlTempl
     state.mode = EditorMode::Insert;
     state.cursor = Index2::new(cursor.row.saturating_sub(1), cursor.col);
     model.editor_state = state;
+    model.contact_lookup = None;
+    model.contact_completion = None;
     model.bottom_panel = BottomPanel::Compose;
     model.active_panel = Panel::Compose;
     model.dialog = None;
@@ -661,6 +814,8 @@ fn open_editor_with_template(model: &mut Model, content: &str, cursor: &MmlTempl
 
 fn cancel_compose(model: &mut Model) {
     model.dialog = None;
+    model.contact_lookup = None;
+    model.contact_completion = None;
     close_bottom_panel(model);
 }
 

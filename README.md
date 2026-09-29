@@ -47,6 +47,7 @@
 - **Interactive wizard** turning an email address into a tested account, shared with the himalaya CLI
 - **Three-pane layout**: mailboxes, envelopes, message body or composer
 - **In-app composer** with system-editor handoff
+- **Recipient completion** from any contact command (khard, abook, notmuch-address, [Cardamum](https://github.com/pimalaya/cardamum)…)
 - **Color themes**: built-in presets plus per-field overrides
 - **TOML configuration** shared with the himalaya CLI, with multi-account support
 
