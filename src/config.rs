@@ -27,11 +27,11 @@ use io_sasl::{
 use pimalaya_config::{
     command::CommandConfig,
     secret::{Secret, SecretResolver},
-    toml::{TomlConfig, shell_expanded_path, shell_expanded_string},
+    toml::{TomlConfig, opt_shell_expanded_path, shell_expanded_path, shell_expanded_string},
 };
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use ratatui::style::{Color, Modifier, Style};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{
@@ -48,17 +48,6 @@ use crate::{
 /// carries only what the user chose.
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
-}
-
-/// Optional flavor of [`shell_expanded_path`], for a path field that
-/// may be omitted.
-///
-/// Pair it with `default`, an absent key never reaching a deserializer.
-///
-/// TODO: drop this once pimalaya-config ships its own
-/// `toml::opt_shell_expanded_path`.
-fn opt_shell_expanded_path<'de, D: Deserializer<'de>>(de: D) -> Result<Option<PathBuf>, D::Error> {
-    shell_expanded_path(de).map(Some)
 }
 
 /// The whole TOML document.
