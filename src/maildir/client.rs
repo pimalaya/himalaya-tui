@@ -30,16 +30,15 @@ impl MaildirClient {
         Self { inner, root }
     }
 
-    /// Resolves a maildir argument: `path` as-is, then `root/path`.
+    /// Resolves a mailbox argument into a loaded [`Maildir`].
     ///
-    /// Both attempts go through
-    /// [`io_maildir::client::MaildirClient::load_maildir`], so the cur,
-    /// new and tmp markers are validated.
+    /// io-maildir resolves every logical name relative to the store root,
+    /// so an absolute path is first reduced to its root-relative name,
+    /// the empty one when it is the root itself. Loading validates the
+    /// `cur`, `new` and `tmp` markers.
     pub fn resolve_maildir(&self, path: &Path) -> Result<Maildir> {
-        if let Ok(maildir) = self.load_maildir(path.to_string_lossy().into_owned()) {
-            return Ok(maildir);
-        }
-        Ok(self.load_maildir(self.root.join(path).to_string_lossy().into_owned())?)
+        let name = path.strip_prefix(&self.root).unwrap_or(path);
+        Ok(self.load_maildir(name.to_string_lossy().into_owned())?)
     }
 }
 
