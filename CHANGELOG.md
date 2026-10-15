@@ -63,6 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Fixed the `Bcc` header being transmitted to every recipient over SMTP (RFC 5322 section 3.6.3). It is now removed before sending, as io-smtp 0.4 does by default.
 - Fixed every Maildir mailbox failing to open with `path <root>/<root>/<mailbox> is not a directory`: the absolute path a mailbox is listed with is now reduced to its root-relative name before io-maildir resolves it, as the CLI does ([#22]).
+- Fixed nested Maildir mailboxes sharing a last segment, such as `Archive` and `[Gmail]/Archive`, showing as identical rows: a Maildir is now named by its path relative to the root, as the CLI does ([#22]).
 
 [#16]: https://github.com/pimalaya/himalaya-tui/issues/16
 [#22]: https://github.com/pimalaya/himalaya-tui/issues/22
