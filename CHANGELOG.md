@@ -59,6 +59,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added mailbox name resolution to the backend-native id before dispatch, so the composer's `Drafts` target lands on a JMAP account too.
 - Added a 60-second idle ping against the active storage backend, so a long reading session does not lose its connection to a server-side inactivity timeout.
 
+### Changed
+
+- Changed piped `--json` output to print one value per line (pimalaya-cli `55b6693`).
+
 ### Fixed
 
 - Fixed the `Bcc` header being transmitted to every recipient over SMTP (RFC 5322 section 3.6.3). It is now removed before sending, as io-smtp 0.4 does by default.

@@ -65,3 +65,4 @@ uds_windows = "1"
 
 [patch.crates-io]
 mime-meta-language.git = "https://github.com/pimalaya/mml"
+pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "55b66933950f02541892407667e5e0b254245871" }
