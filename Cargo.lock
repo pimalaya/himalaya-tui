@@ -1300,6 +1300,7 @@ dependencies = [
  "log",
  "mail-parser",
  "mime-meta-language",
+ "nom 7.1.3",
  "pimalaya-cli",
  "pimalaya-config",
  "pimalaya-stream",

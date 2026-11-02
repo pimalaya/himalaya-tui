@@ -13,7 +13,7 @@ repository = "https://github.com/pimalaya/himalaya-tui"
 
 [features]
 default = ["rustls-ring", "imap", "smtp", "jmap", "maildir"]
-imap = ["dep:io-imap", "io-imap/client", "pimalaya-cli/imap"]
+imap = ["dep:io-imap", "dep:nom", "io-imap/client", "pimalaya-cli/imap"]
 smtp = ["dep:io-smtp", "io-smtp/client", "pimalaya-cli/smtp"]
 jmap = ["dep:io-jmap", "dep:base64", "io-jmap/client", "pimalaya-cli/jmap"]
 maildir = ["dep:io-maildir", "io-maildir/client", "io-maildir/parser"]
@@ -39,6 +39,11 @@ clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
 html2text = "0.17"
 io-imap = { version = "0.6", default-features = false, optional = true }
+# NOTE: imap-codec 2.0.0-alpha.9, under io-imap 0.6, uses nom's alloc parsers
+# without asking for the feature, which abnf-core 0.6.1 no longer turns on for
+# it. Never imported, this entry restores the feature until io-imap or
+# imap-codec releases its own fix.
+nom = { version = "7", default-features = false, features = ["alloc"], optional = true }
 io-jmap = { version = "0.3", default-features = false, optional = true }
 io-maildir = { version = "0.3", default-features = false, optional = true }
 io-pim-discovery = { version = "0.8", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "rfc8620"] }
