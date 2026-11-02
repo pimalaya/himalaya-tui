@@ -7,16 +7,17 @@
 //! All I/O goes through `model.client`: the model is the sole owner of
 //! both the UI state and the email client.
 
-use std::{slice, time::Instant};
+use std::{borrow::Cow, slice, time::Instant};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use edtui::{
     EditorMode, EditorState, Index2, Lines,
     actions::{DeleteChar, Execute, InsertChar, OpenSystemEditor},
 };
-use mail_parser::MessageParser;
+use mime::tree::{cst::MimeCst, entity::MimeEntity};
 use mml::{
     compiler::message::MmlCompileOptions,
+    interpreter::layer::MmlMimeLayer,
     template::{
         MmlTemplateCursor, compose::MmlTemplateComposeBuilder, forward::MmlTemplateForwardBuilder,
         reply::MmlTemplateReplyBuilder,
@@ -770,7 +771,10 @@ fn start_compose(model: &mut Model) {
 }
 
 fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
-    let Some(msg) = mail_parser::MessageParser::default().parse(raw_message) else {
+    // NOTE: mml builds its templates from its own parse of the source, so
+    // the message goes through mml's parser here, not mime-rs.
+    let layer = MmlMimeLayer::parse(Cow::Borrowed(raw_message));
+    let Ok(msg) = layer.message() else {
         set_status(model, "Error: failed to parse message");
         return;
     };
@@ -778,7 +782,7 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
     // NOTE: the builder does not interpret the source, so the quote is
     // rendered here. mml carries no PGP backend in this build, so an
     // encrypted thread quotes as an unresolved marker.
-    let quote = match MmlTemplateReplyBuilder::quote_options().interpret_msg(&msg) {
+    let quote = match MmlTemplateReplyBuilder::quote_options().interpret_msg(msg) {
         Ok(quote) => quote,
         Err(err) => {
             set_status(model, format!("Error rendering the quote: {err}"));
@@ -793,7 +797,7 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
         reply_all,
         ..Default::default()
     }
-    .build(&msg, &quote);
+    .build(msg, &quote);
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
@@ -802,12 +806,13 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
 }
 
 fn start_forward(model: &mut Model, raw_message: &[u8]) {
-    let Some(msg) = mail_parser::MessageParser::default().parse(raw_message) else {
+    let layer = MmlMimeLayer::parse(Cow::Borrowed(raw_message));
+    let Ok(msg) = layer.message() else {
         set_status(model, "Error: failed to parse message");
         return;
     };
 
-    let quote = match MmlTemplateForwardBuilder::quote_options().interpret_msg(&msg) {
+    let quote = match MmlTemplateForwardBuilder::quote_options().interpret_msg(msg) {
         Ok(quote) => quote,
         Err(err) => {
             set_status(model, format!("Error rendering the quote: {err}"));
@@ -821,7 +826,7 @@ fn start_forward(model: &mut Model, raw_message: &[u8]) {
         signature: model.signature.clone(),
         ..Default::default()
     }
-    .build(&msg, &quote);
+    .build(msg, &quote);
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
@@ -1090,16 +1095,124 @@ fn do_save_draft(model: &mut Model) {
 }
 
 /// Decodes a raw message into displayable text, plain part before HTML.
+///
+/// The first part of the RFC 8621 §4.1.4 text body is shown, then the
+/// first of the HTML body, and the raw bytes when neither is text. The
+/// text body holds an HTML part when the message has no plain one.
 pub fn decode_message_body(raw: &[u8]) -> Result<String> {
-    let Some(msg) = MessageParser::default().parse(raw) else {
-        bail!("Failed to parse message")
+    let parsed = MimeCst::parse(raw);
+    let lists = parsed.root.body_lists();
+
+    for part in [lists.text.first(), lists.html.first()]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(text) = part_text(part)? {
+            return Ok(text);
+        }
+    }
+
+    Ok(String::from_utf8_lossy(raw).to_string())
+}
+
+/// The text of a body part, HTML rendered as text; `None` for a part
+/// that is not text, such as an inline image.
+fn part_text(part: &MimeEntity) -> Result<Option<String>> {
+    let content_type = part.content_type();
+    let html = content_type.is("text", "html");
+
+    if !html && !content_type.is("text", "plain") {
+        return Ok(None);
+    }
+
+    let Some(text) = part.text() else {
+        return Ok(None);
     };
 
-    if let Some(text) = msg.body_text(0) {
-        Ok(text.to_string())
-    } else if let Some(html) = msg.body_html(0) {
-        Ok(html2text::from_read(html.as_bytes(), 80)?)
+    if html {
+        // NOTE: undecorated, no `**bold**` and no link footnotes, as
+        // mail-parser's own HTML-to-text rendered an HTML-only body.
+        let config = html2text::config::plain_no_decorate();
+        Ok(Some(config.string_from_read(text.as_bytes(), 80)?))
     } else {
-        Ok(String::from_utf8_lossy(raw).to_string())
+        Ok(Some(text.into_owned()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_message_body;
+
+    /// A text part is transfer-decoded and transcoded from its charset.
+    #[test]
+    fn a_text_part_is_decoded_from_its_charset() {
+        let raw = concat!(
+            "From: a@x.org\r\n",
+            "Content-Type: text/plain; charset=iso-8859-1\r\n",
+            "Content-Transfer-Encoding: quoted-printable\r\n",
+            "\r\n",
+            "caf=E9 cr=E8me\r\n",
+        );
+
+        let body = decode_message_body(raw.as_bytes()).unwrap();
+
+        assert_eq!(body, "café crème\r\n");
+    }
+
+    /// A multi-byte charset decodes too, where mail-parser built without
+    /// its `full_encoding` feature read the bytes as lossy UTF-8.
+    #[test]
+    fn a_multi_byte_charset_is_decoded() {
+        let mut raw = concat!(
+            "From: a@x.org\r\n",
+            "Content-Type: text/plain; charset=shift_jis\r\n",
+            "\r\n",
+        )
+        .as_bytes()
+        .to_vec();
+        raw.extend_from_slice(&[0x93, 0xFA, 0x96, 0x7B]);
+
+        let body = decode_message_body(&raw).unwrap();
+
+        assert_eq!(body, "日本");
+    }
+
+    /// Of two alternatives the plain one is shown, the HTML left out.
+    #[test]
+    fn the_plain_alternative_wins_over_the_html_one() {
+        let raw = concat!(
+            "From: a@x.org\r\n",
+            "Content-Type: multipart/alternative; boundary=b\r\n",
+            "\r\n",
+            "--b\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "plain\r\n",
+            "--b\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "\r\n",
+            "<p>html</p>\r\n",
+            "--b--\r\n",
+        );
+
+        let body = decode_message_body(raw.as_bytes()).unwrap();
+
+        assert_eq!(body, "plain");
+    }
+
+    /// An HTML-only message is rendered as text, its markup gone and no
+    /// emphasis marker added in its place.
+    #[test]
+    fn an_html_only_message_is_rendered_as_text() {
+        let raw = concat!(
+            "From: a@x.org\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "\r\n",
+            "<p>Hello <b>world</b></p>\r\n",
+        );
+
+        let body = decode_message_body(raw.as_bytes()).unwrap();
+
+        assert_eq!(body, "Hello world\n");
     }
 }

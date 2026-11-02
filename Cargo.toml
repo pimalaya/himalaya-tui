@@ -50,8 +50,8 @@ io-pim-discovery = { version = "0.8", default-features = false, features = ["pac
 io-sasl = { version = "0.1", default-features = false, features = ["scram"] }
 io-smtp = { version = "0.4", default-features = false, optional = true }
 log = "0.4"
-mail-parser = "0.11"
 mime-meta-language = { version = "1.1", default-features = false, features = ["compiler", "interpreter"] }
+mime-rs = { version = "0.0.1", git = "https://github.com/pimalaya/mime-rs", rev = "d7ea03296a197647a6effeb593a8528b47bdb0ed" }
 pimalaya-cli = { version = "0.2", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
 pimalaya-config = { version = "0.2.1", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }

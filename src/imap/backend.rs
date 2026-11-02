@@ -32,7 +32,10 @@ use io_imap::{
         status::{StatusDataItem, StatusDataItemName},
     },
 };
-use mail_parser::MessageParser;
+use mime::{
+    header::marker::MESSAGE_ID,
+    tree::{cst::MimeCst, parse::MimeParseOptions},
+};
 use rfc2047_decoder::{Decoder, RecoverStrategy};
 
 use crate::{
@@ -200,9 +203,15 @@ impl ImapClient {
             return Ok(uid.to_string());
         }
 
-        let message_id = MessageParser::default()
-            .parse_headers(&raw)
-            .and_then(|parsed| parsed.message_id().map(str::to_string))
+        // NOTE: the header block alone, the body left unsplit.
+        let opts = MimeParseOptions {
+            structure_depth: Some(0),
+            ..Default::default()
+        };
+        let message_id = MimeCst::parse_with(&raw, opts)
+            .root
+            .header::<MESSAGE_ID>()
+            .and_then(|ids| ids.into_iter().next())
             .filter(|id| !id.is_empty());
         let Some(message_id) = message_id else {
             bail!(

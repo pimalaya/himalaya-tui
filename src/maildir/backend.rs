@@ -11,13 +11,17 @@
 use std::{cmp::Reverse, path::Path};
 
 use anyhow::Result;
-use chrono::DateTime;
+use chrono::{FixedOffset, TimeZone};
 use io_maildir::{
     entry::MaildirFullEntry,
     flag::{MaildirFlag, MaildirFlags},
     maildir::{Maildir, MaildirSubdir},
 };
-use mail_parser::Address as MailParserAddress;
+use mime::{
+    header::marker::{DATE, FROM, MESSAGE_ID, SUBJECT, TO},
+    tree::cst::MimeCst,
+    value::address::MimeAddressList,
+};
 
 use crate::{
     email::{
@@ -154,67 +158,62 @@ fn mailbox_from(client: &MaildirClient, maildir: Maildir) -> Mailbox {
 /// Folds a fully-read Maildir entry into a shared [`Envelope`], parsing
 /// the RFC 5322 headers and mapping the flags io-maildir resolved.
 fn envelope_from_entry(entry: &MaildirFullEntry) -> Envelope {
-    let id = entry.id().unwrap_or_default().to_string();
-    let flags = entry.flags().iter().map(flag_from_maildir).collect();
-    let size = entry.contents().len() as u64;
-    let parsed = entry.parsed();
-
-    let subject = parsed
-        .as_ref()
-        .and_then(|m| m.subject())
-        .unwrap_or_default()
-        .to_string();
-
-    let from = parsed
-        .as_ref()
-        .and_then(|m| m.from())
-        .map(addresses_from)
-        .unwrap_or_default();
-
-    let to = parsed
-        .as_ref()
-        .and_then(|m| m.to())
-        .map(addresses_from)
-        .unwrap_or_default();
-
-    let date = parsed
-        .as_ref()
-        .and_then(|m| m.date())
-        .and_then(|d| DateTime::parse_from_rfc3339(&d.to_rfc3339()).ok());
-
-    let has_attachment = parsed.as_ref().map(|m| m.attachment_count() > 0);
-
-    let message_id = parsed
-        .as_ref()
-        .and_then(|m| m.message_id())
-        .and_then(normalize_message_id);
-
     Envelope {
-        id,
-        message_id,
-        flags,
-        subject,
-        from,
-        to,
-        date,
-        size,
-        has_attachment,
+        id: entry.id().unwrap_or_default().to_string(),
+        flags: entry.flags().iter().map(flag_from_maildir).collect(),
+        ..envelope_from_raw(entry.contents())
     }
 }
 
-/// Converts a mail-parser address group into shared [`Address`]es.
-fn addresses_from(addrs: &MailParserAddress<'_>) -> Vec<Address> {
-    addrs
-        .clone()
-        .into_list()
-        .into_iter()
-        .filter_map(|a| {
-            let email = a.address?.into_owned();
-            if email.is_empty() {
-                return None;
-            }
-            let name = a.name.map(|s| s.into_owned());
-            Some(Address { name, email })
+/// The envelope of a raw message, its id and flags left empty for the
+/// entry to fill.
+///
+/// The body is split too, to say whether the message holds an attachment:
+/// any part of the RFC 8621 §4.1.4 attachment list counts, an inline image
+/// included.
+fn envelope_from_raw(raw: &[u8]) -> Envelope {
+    let parsed = MimeCst::parse(raw);
+    let root = &parsed.root;
+
+    let addresses =
+        |list: Option<MimeAddressList>| list.map(|list| addresses_from(&list)).unwrap_or_default();
+
+    let date = root
+        .header::<DATE>()
+        .filter(|date| date.is_valid())
+        .and_then(|date| {
+            let offset = FixedOffset::east_opt(i32::from(date.offset) * 60)?;
+            offset.timestamp_opt(date.to_unix_seconds(), 0).single()
+        });
+
+    let message_id = root
+        .header::<MESSAGE_ID>()
+        .and_then(|ids| ids.into_iter().next())
+        .and_then(|id| normalize_message_id(&id));
+
+    Envelope {
+        id: String::new(),
+        message_id,
+        flags: Default::default(),
+        subject: root.header::<SUBJECT>().unwrap_or_default(),
+        from: addresses(root.header::<FROM>()),
+        to: addresses(root.header::<TO>()),
+        date,
+        size: raw.len() as u64,
+        has_attachment: Some(!root.body_lists().attachments.is_empty()),
+    }
+}
+
+/// Converts a mime-rs address list into shared [`Address`]es, groups
+/// flattened, mailboxes with no address left out.
+fn addresses_from(list: &MimeAddressList) -> Vec<Address> {
+    list.mailboxes()
+        .filter_map(|mailbox| {
+            let email = mailbox.address.clone().filter(|email| !email.is_empty())?;
+            Some(Address {
+                name: mailbox.name.clone(),
+                email,
+            })
         })
         .collect()
 }
@@ -318,5 +317,95 @@ mod tests {
         let custom = flag_from_maildir(&MaildirFlag::keyword("NonJunk"));
         assert_eq!(custom.raw(), "NonJunk");
         assert_eq!(custom.iana(), None);
+    }
+
+    /// Every envelope field is read off the raw message: encoded words
+    /// decoded, a folded subject unfolded, groups flattened into their
+    /// members, the date keeping its offset.
+    #[test]
+    fn the_envelope_is_read_off_the_raw_message() {
+        let raw = concat!(
+            "From: =?utf-8?q?Ren=C3=A9?= <rene@x.org>\r\n",
+            "To: Friends: b@x.org, \"Carol C\" <c@x.org>;, d@x.org\r\n",
+            "Subject: =?iso-8859-1?q?caf=E9?= au\r\n",
+            " lait\r\n",
+            "Date: Mon, 2 Nov 2026 10:20:30 +0100\r\n",
+            "Message-ID: <abc@x.org>\r\n",
+            "Content-Type: multipart/mixed; boundary=b\r\n",
+            "\r\n",
+            "--b\r\n",
+            "Content-Type: text/plain\r\n",
+            "\r\n",
+            "hi\r\n",
+            "--b\r\n",
+            "Content-Type: application/pdf\r\n",
+            "Content-Disposition: attachment; filename=a.pdf\r\n",
+            "\r\n",
+            "%PDF\r\n",
+            "--b--\r\n",
+        );
+
+        let envelope = envelope_from_raw(raw.as_bytes());
+        let address = |name: Option<&str>, email: &str| Address {
+            name: name.map(String::from),
+            email: email.to_string(),
+        };
+
+        assert_eq!(envelope.subject, "café au lait");
+        assert_eq!(envelope.from, [address(Some("René"), "rene@x.org")]);
+        assert_eq!(
+            envelope.to,
+            [
+                address(None, "b@x.org"),
+                address(Some("Carol C"), "c@x.org"),
+                address(None, "d@x.org"),
+            ]
+        );
+        assert_eq!(
+            envelope.date.map(|date| date.to_rfc3339()).as_deref(),
+            Some("2026-11-02T10:20:30+01:00")
+        );
+        assert_eq!(envelope.message_id.as_deref(), Some("abc@x.org"));
+        assert_eq!(envelope.size, raw.len() as u64);
+        assert_eq!(envelope.has_attachment, Some(true));
+    }
+
+    /// A message with no attachment says so, and a missing header leaves
+    /// its field empty rather than failing the listing.
+    #[test]
+    fn a_bare_message_has_empty_fields_and_no_attachment() {
+        let envelope = envelope_from_raw(b"From: a@x.org\r\n\r\nhello\r\n");
+
+        assert_eq!(envelope.subject, "");
+        assert!(envelope.to.is_empty());
+        assert_eq!(envelope.date, None);
+        assert_eq!(envelope.message_id, None);
+        assert_eq!(envelope.has_attachment, Some(false));
+    }
+
+    /// An image a `multipart/related` HTML body refers to counts as an
+    /// attachment, as it always has on this backend.
+    #[test]
+    fn a_related_image_counts_as_an_attachment() {
+        let raw = concat!(
+            "From: a@x.org\r\n",
+            "Content-Type: multipart/related; boundary=b\r\n",
+            "\r\n",
+            "--b\r\n",
+            "Content-Type: text/html\r\n",
+            "\r\n",
+            "<img src=\"cid:logo\">\r\n",
+            "--b\r\n",
+            "Content-Type: image/png\r\n",
+            "Content-ID: <logo>\r\n",
+            "Content-Disposition: inline\r\n",
+            "\r\n",
+            "PNG\r\n",
+            "--b--\r\n",
+        );
+
+        let envelope = envelope_from_raw(raw.as_bytes());
+
+        assert_eq!(envelope.has_attachment, Some(true));
     }
 }

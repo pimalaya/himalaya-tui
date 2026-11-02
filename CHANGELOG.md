@@ -63,12 +63,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Bumped ctutils to 0.4.6, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382, RUSTSEC-2026-0383 and RUSTSEC-2026-0385.
 - Changed piped `--json` output to print one value per line (pimalaya-cli `55b6693`).
+- Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for message bodies, Maildir envelopes, the SMTP envelope and the IMAP `Message-ID` fallback.
+
+  An HTML-only body is now rendered by html2text, undecorated: headings, lists and paragraphs keep their layout and long lines wrap at 80 columns, where they used to run together.
 
 ### Fixed
 
 - Fixed the `Bcc` header being transmitted to every recipient over SMTP (RFC 5322 section 3.6.3). It is now removed before sending, as io-smtp 0.4 does by default.
 - Fixed every Maildir mailbox failing to open with `path <root>/<root>/<mailbox> is not a directory`: the absolute path a mailbox is listed with is now reduced to its root-relative name before io-maildir resolves it, as the CLI does ([#22]).
 - Fixed nested Maildir mailboxes sharing a last segment, such as `Archive` and `[Gmail]/Archive`, showing as identical rows: a Maildir is now named by its path relative to the root, as the CLI does ([#22]).
+- Fixed message bodies and Maildir subjects in multi-byte charsets such as Shift_JIS, Big5, GBK or EUC-KR reading as replacement characters: they are now decoded. Reply and forward quotes still go through mml's parser and keep the old behaviour.
 
 [#16]: https://github.com/pimalaya/himalaya-tui/issues/16
 [#22]: https://github.com/pimalaya/himalaya-tui/issues/22

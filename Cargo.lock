@@ -192,6 +192,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
+name = "base64-codec"
+version = "0.0.1"
+source = "git+https://github.com/pimalaya/base64-codec?rev=d39f6b90f02abf8eb91ef041b7601320df8def99#d39f6b90f02abf8eb91ef041b7601320df8def99"
+dependencies = [
+ "simd-cpu",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1298,8 +1306,8 @@ dependencies = [
  "io-sasl",
  "io-smtp",
  "log",
- "mail-parser",
  "mime-meta-language",
+ "mime-rs",
  "nom 7.1.3",
  "pimalaya-cli",
  "pimalaya-config",
@@ -2074,6 +2082,18 @@ dependencies = [
  "shellexpand",
  "thiserror 2.0.21",
  "tree_magic_mini",
+]
+
+[[package]]
+name = "mime-rs"
+version = "0.0.1"
+source = "git+https://github.com/pimalaya/mime-rs?rev=d7ea03296a197647a6effeb593a8528b47bdb0ed#d7ea03296a197647a6effeb593a8528b47bdb0ed"
+dependencies = [
+ "base64-codec",
+ "encoding_rs",
+ "memchr",
+ "quoted-printable-codec",
+ "simd-cpu",
 ]
 
 [[package]]
@@ -2872,6 +2892,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quoted-printable-codec"
+version = "0.0.1"
+source = "git+https://github.com/pimalaya/quoted-printable-codec?rev=d63612b0f9c046717e183e3be534c98f300d913a#d63612b0f9c046717e183e3be534c98f300d913a"
+dependencies = [
+ "simd-cpu",
+]
+
+[[package]]
 name = "quoted_printable"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3502,6 +3530,11 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
+name = "simd-cpu"
+version = "0.0.1"
+source = "git+https://github.com/pimalaya/simd-cpu?rev=f2eb72cff2fafad8ae135e00685bc19f9e80e5cc#f2eb72cff2fafad8ae135e00685bc19f9e80e5cc"
 
 [[package]]
 name = "simd_cesu8"
