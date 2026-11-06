@@ -126,6 +126,9 @@ The account blocks are the ones the CLI documents, so the ready-made configurati
 
 Only the CLI-only keys around them are ignored.
 
+> [!NOTE]
+> The himalaya-tui is still a work in progress and doesn't support all the recipes supported by [himalaya](https://github.com/pimalaya/himalaya) yet. The ones which are currently supported are IMAP, JMAP and Maildir, Gmail APIs are not yet supported but can be used with IMAP.
+
 ### Theming
 
 The TUI uses named ANSI colors by default, so the rendering inherits the colors of your terminal palette. Pick a preset and/or override individual fields in the `[theme]` block of your config (full reference in [config.sample.toml](./config.sample.toml)):
