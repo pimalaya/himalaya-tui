@@ -126,6 +126,9 @@ The account blocks are the ones the CLI documents, so the ready-made configurati
 
 Only the CLI-only keys around them are ignored.
 
+> [!IMPORTANT]
+> The TUI only speaks IMAP, JMAP and Maildir (plus SMTP for sending). The other backend blocks the CLI accepts (`gmail`, `msgraph`, `mbox`, `m2dir`, `pimdir`) are ignored, so the Gmail API and Microsoft Graph variants of the recipes do not work here yet: keep the `imap` and `smtp` blocks in the account for the TUI to use.
+
 ### Theming
 
 The TUI uses named ANSI colors by default, so the rendering inherits the colors of your terminal palette. Pick a preset and/or override individual fields in the `[theme]` block of your config (full reference in [config.sample.toml](./config.sample.toml)):
