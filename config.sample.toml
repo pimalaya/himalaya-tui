@@ -1,42 +1,34 @@
 # ================================================================================
 # himalaya-tui configuration file.
 #
-# Loaded from the first valid path among:
+# The TUI reads the himalaya CLI's own configuration, from the first valid path
+# among:
 #   - $XDG_CONFIG_HOME/himalaya/config.toml
 #   - $HOME/.config/himalaya/config.toml
 #   - $HOME/.himalayarc
 #
-# Override with `himalaya-tui -c <PATH>` or `HIMALAYA_CONFIG=<PATH>`. Multiple
-# paths can be passed at once, separated by `:`; the first one is the base and
-# the rest are deep-merged on top of it. `--no-config` skips on-disk config.
+# Override with `himalaya-tui -c <PATH>`, repeated to merge several files: the
+# first one is the base and the next ones are deep-merged on top of it.
 #
-# A run that resolves no account falls back to the wizard, the himalaya CLI's
-# own: it discovers an account from an email address, then offers to write the
-# `[accounts.<name>]` block here. Ask for it with `himalaya-tui <EMAIL>` or
-# `--no-config`; declining the offer opens the account for the session alone.
+# The TUI runs himalaya's own commands, so everything about an account (its
+# backends, credentials, mailbox aliases, sent copy) is himalaya's and is
+# documented in himalaya's sample:
+#   https://github.com/pimalaya/himalaya/blob/master/config.sample.toml
 #
-# One file backs both binaries, so TUI-only fields (`keybinds`, `theme`) and
-# CLI-only sections (`table`, `envelope`, `message`, `attachment`, `account`)
-# coexist. The identity is read under either spelling, `from`/`from-name` or
-# `email`/`display-name`, and written under the CLI's.
+# This file documents what the TUI adds on top: the composer's keybindings, the
+# contact command and the theme. Himalaya ignores those keys, so one file backs
+# both binaries.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
 # Global config
 # --------------------------------------------------------------------------------
 
-# Default From display name used by the in-app composer when an account does
-# not override it.
+# From display name and signature, himalaya's keys, which the TUI's composer
+# reads too. The signature is the signature alone: `signature-delim` introduces
+# it, defaulting to the RFC 3676 `"-- \n"`, written verbatim.
 #display-name = "Example"
-
-# Default signature appended to outgoing drafts. The value is the signature
-# alone: the separator introducing it is `signature-delim` below, so the same
-# value reads the same under the himalaya CLI.
 #signature = "Regards,\nExample"
-
-# Signature delimiter inserted between the body and the signature. Defaults to
-# the RFC 3676 `"-- \n"` separator, and is written verbatim, so a delimiter
-# meant to stand on its own line carries its own trailing newline.
 #signature-delim = "-- \n"
 
 # Composer keybinding flavor: `vim` (default) or `emacs`, overridden by the
@@ -131,6 +123,11 @@
 #[theme.envelope-unread]
 #mod = ["bold"]
 
+# Envelope row marked for an action, patched over its seen or unread style.
+#[theme.envelope-marked]
+#fg = "magenta"
+#mod = ["bold"]
+
 # Message reader body text.
 #[theme.message-body]
 #fg = "white"
@@ -153,246 +150,20 @@
 # Account config
 # --------------------------------------------------------------------------------
 
-# Declare one section per account. Pick one with `himalaya-tui -a <NAME>`, or
-# let the entry flagged `default = true` be used. The positional argument is
-# not an account name: it answers the wizard's first prompt instead.
+# One section per account, as himalaya's sample documents it. Pick one with
+# `himalaya-tui -a <NAME>`, or let the entry flagged `default = true` be used.
 [accounts.example]
-
-# Use this account when `-a` is not passed.
 default = true
 
-# From address used when sending, overridden by the `--from <EMAIL>` flag.
-# Also spelled `email`, the key the himalaya CLI writes: both binaries read
-# both spellings, one file backing the two.
-#from = "user@example.com"
+# The identity the composer writes from, overridden by `--from` and
+# `--from-name`. `from` and `from-name` are read as aliases.
+#email = "user@example.com"
+#display-name = "Example User"
 
-# From display name, overridden by the `--from-name <NAME>` flag. Also spelled
-# `display-name`, the key the himalaya CLI writes.
-#from-name = "Example User"
-
-# Per-account overrides for the global options above.
+# Per-account overrides of the global options above.
 #signature = "Best,\nExample User"
-#signature-delim = "-- \n"
 #contact-command = ["abook", "--mutt-query", "%s"]
 
-# Mailbox aliases mapping a friendly name to a backend-native id, written by
-# the wizard from what the server reported. Read by the himalaya CLI, which
-# addresses a mailbox by id, and inert here: a name is resolved against the
-# live listing before every dispatch.
-#mailbox.alias.inbox = "INBOX"
-#mailbox.alias.drafts = "Drafts"
-
-# --------------------------------------------------------------------------------
-# IMAP config
-# https://www.iana.org/go/rfc9051
-# --------------------------------------------------------------------------------
-
-# IMAP server, a bare authority (`host[:port]`) meaning `imaps://`. A full URL
-# takes `imap://` (cleartext, optionally upgraded via STARTTLS), `imaps://`
-# (implicit TLS) or `unix://` (a pre-authenticated local socket proxy such as
-# sirup, over which no SASL is negotiated). Any other scheme is rejected.
-imap.server = "example.com"
-#imap.server = "imap.example.com:143"
-#imap.server = "imap://example.com:143"
-#imap.server = "imaps://example.com:993"
-#imap.server = "unix:///run/user/1000/sirup/imap.sock"
-
-# TLS provider, defaults to the first available at runtime.
-#imap.tls.provider = "rustls"
-#imap.tls.provider = "native-tls"
-
-# Crypto provider for rustls, defaults to the first available at runtime.
-#imap.tls.rustls.crypto = "ring"
-#imap.tls.rustls.crypto = "aws"
-
-# Custom TLS certificate (extra root, PEM-encoded), shell-expanded.
-#imap.tls.cert = "/path/to/custom/cert.pem"
-
-# Enable STARTTLS (only valid when the server resolves to `imap://`).
-#imap.starttls = false
-
-# ALPN identifiers offered during the TLS handshake, read by rustls alone.
-# Unset applies io-imap's own default (["imap"]), and [] skips the negotiation.
-#imap.alpn = ["imap"]
-#imap.alpn = []
-
-# Pick exactly one SASL mechanism among `anonymous`, `login`, `plain`,
-# `oauthbearer`, `xoauth2`, `scram-sha-256`. Omit the whole `imap.sasl` table
-# to skip authentication entirely (no `AUTHENTICATE` command sent).
-
-# SASL ANONYMOUS
-# https://datatracker.ietf.org/doc/html/rfc4505
-#imap.sasl.anonymous.message = "himalaya"
-
-# SASL PLAIN
-# https://datatracker.ietf.org/doc/html/rfc4616
-imap.sasl.plain.username = "user@example.com"
-imap.sasl.plain.password.raw = "***"
-#imap.sasl.plain.password.command = "pass show example"
-
-# SASL LOGIN
-# https://datatracker.ietf.org/doc/html/draft-murchison-sasl-login-00
-#imap.sasl.login.username = "user@example.com"
-#imap.sasl.login.password.raw = "***"
-
-# SASL OAUTHBEARER (host/port for the GS2 header are derived from the
-# IMAP server URL at connect time).
-# https://datatracker.ietf.org/doc/html/rfc7628
-#imap.sasl.oauthbearer.username = "user@example.com"
-#imap.sasl.oauthbearer.token.raw = "***"
-#imap.sasl.oauthbearer.token.command = ["ortie", "token", "show", "-a", "example"]
-
-# SASL XOAUTH2 (Google's pre-standard OAuth 2.0 SASL).
-# https://developers.google.com/gmail/imap/xoauth2-protocol
-#imap.sasl.xoauth2.username = "user@example.com"
-#imap.sasl.xoauth2.token.raw = "***"
-
-# SASL SCRAM-SHA-256.
-# https://datatracker.ietf.org/doc/html/rfc7677
-#imap.sasl.scram-sha-256.username = "user@example.com"
-#imap.sasl.scram-sha-256.password.raw = "***"
-
-# RFC 4959 SASL-IR, following the advertised capability when unset. `false`
-# waits for the server's continuation request instead of sending credentials
-# inline, which is what Coremail (126.com, 163.com) needs; `true` always
-# inlines them.
-# https://www.rfc-editor.org/rfc/rfc4959.html
-#imap.sasl-ir = false
-
-# RFC 2971 ID extension. Some providers (mail.qq.com, fastmail) require an `ID`
-# exchange straight after authentication; set `auto = true` to opt in.
-# https://www.rfc-editor.org/rfc/rfc2971.html
-#imap.id.auto = false
-
-# Per-field policy for the auto-ID command, an empty map sending `ID NIL`.
-# `true` substitutes the canned value for a well-known key (name, version,
-# vendor, support-url) and NIL for any other, `false` always sends NIL. A key
-# absent from this map is not sent at all.
-#imap.id.fields = { name = true, version = true, vendor = true, support-url = true }
-
-# RFC 5256 SORT fallback, read by the himalaya CLI alone. The TUI paginates a
-# sequence-set window rather than issuing `SORT`, so it accepts the option to
-# keep a shared file loading, then ignores it.
-# https://www.rfc-editor.org/rfc/rfc5256.html
-#imap.sort.fallback = false
-
-# --------------------------------------------------------------------------------
-# JMAP config
-# https://www.iana.org/go/rfc8620
-# https://www.iana.org/go/rfc8621
-# --------------------------------------------------------------------------------
-
-# JMAP server address. Either a bare authority (auto-discovered via
-# `GET /.well-known/jmap`) or a full session URL.
-#jmap.server = "fastmail.com"
-#jmap.server = "https://api.fastmail.com/jmap/session"
-
-# JMAP TLS provider (mirrors the imap.tls block above).
-#jmap.tls.provider = "rustls"
-#jmap.tls.rustls.crypto = "ring"
-#jmap.tls.cert = "/path/to/custom/cert.pem"
-
-# ALPN identifiers offered during the TLS handshake. Unset applies io-jmap's
-# own default (["http/1.1"], JMAP riding on HTTP/1.1), and [] skips the
-# negotiation.
-#jmap.alpn = ["http/1.1"]
-#jmap.alpn = []
-
-# Pick exactly one of `header`, `bearer`, `basic`.
-
-# Raw `Authorization` header value, used verbatim.
-#jmap.auth.header.raw = "Bearer eyJhbGciOiJ…"
-#jmap.auth.header.command = "pass show fastmail-token"
-
-# OAuth 2.0 / API token bearer.
-#jmap.auth.bearer.token.raw = "***"
-#jmap.auth.bearer.token.command = ["ortie", "token", "show", "-a", "fastmail"]
-
-# HTTP Basic.
-#jmap.auth.basic.username = "user@example.com"
-#jmap.auth.basic.password.raw = "***"
-#jmap.auth.basic.password.command = "pass show fastmail"
-
-# Identity to send as, the first one `Identity/get` reports when omitted. Set
-# it to pin a specific one, listing them with `himalaya jmap identity get`.
-#jmap.identity-id = "I0123abc"
-
-# Drafts mailbox id used to stage outgoing messages before submission. Omitted,
-# the mailbox with the `drafts` role is resolved from the live session. Find it
-# with `himalaya jmap mailbox query --role drafts`.
-#jmap.drafts-mailbox-id = "M0123abc"
-
-# --------------------------------------------------------------------------------
-# Maildir config
-# --------------------------------------------------------------------------------
-
-# Root directory containing one subdirectory per mailbox (Maildir++ layout).
-# Shell-expanded, so a leading `~` and any `$VAR` name what they do in a shell.
-#maildir.root = "~/Mail/example"
-
-# --------------------------------------------------------------------------------
-# SMTP config
-# https://www.iana.org/go/rfc5321
-# --------------------------------------------------------------------------------
-
-# SMTP server, a bare authority (`host[:port]`) meaning `smtps://`. A full URL
-# takes `smtp://` (cleartext, optionally upgraded via STARTTLS), `smtps://`
-# (implicit TLS) or `unix://` (a pre-authenticated local socket proxy such as
-# sirup, over which no SASL is negotiated). Any other scheme is rejected.
-#
-# A storage backend that cannot send on its own (IMAP, Maildir) routes the
-# composer through this block, JMAP sending on its own and ignoring it. The
-# connection opens on the first send, not at startup.
-smtp.server = "example.com"
-#smtp.server = "smtp.example.com:587"
-#smtp.server = "smtp://example.com:587"
-#smtp.server = "smtps://example.com:465"
-#smtp.server = "unix:///run/user/1000/sirup/smtp.sock"
-
-# TLS provider, defaults to the first available at runtime.
-#smtp.tls.provider = "rustls"
-#smtp.tls.provider = "native-tls"
-
-# Crypto provider for rustls, defaults to the first available at runtime.
-#smtp.tls.rustls.crypto = "ring"
-#smtp.tls.rustls.crypto = "aws"
-
-# Custom TLS certificate (extra root, PEM-encoded), shell-expanded.
-#smtp.tls.cert = "/path/to/custom/cert.pem"
-
-# Enable STARTTLS (only valid when the server resolves to `smtp://`).
-#smtp.starttls = false
-
-# ALPN identifiers offered during the TLS handshake, read by rustls alone.
-# Unset applies io-smtp's own default (["smtp"]), and [] skips the negotiation.
-#smtp.alpn = ["smtp"]
-#smtp.alpn = []
-
-# Pick exactly one SASL mechanism among `anonymous`, `login`, `plain`,
-# `oauthbearer`, `xoauth2`, `scram-sha-256`. Omit the whole `smtp.sasl` table
-# to skip authentication entirely.
-
-# SASL ANONYMOUS
-#smtp.sasl.anonymous.message = "himalaya"
-
-# SASL PLAIN
-smtp.sasl.plain.username = "user@example.com"
-smtp.sasl.plain.password.raw = "***"
-#smtp.sasl.plain.password.command = "pass show example"
-
-# SASL LOGIN
-#smtp.sasl.login.username = "user@example.com"
-#smtp.sasl.login.password.raw = "***"
-
-# SASL OAUTHBEARER (host/port for the GS2 header are derived from the
-# SMTP server URL at connect time).
-#smtp.sasl.oauthbearer.username = "user@example.com"
-#smtp.sasl.oauthbearer.token.raw = "***"
-
-# SASL XOAUTH2
-#smtp.sasl.xoauth2.username = "user@example.com"
-#smtp.sasl.xoauth2.token.raw = "***"
-
-# SASL SCRAM-SHA-256
-#smtp.sasl.scram-sha-256.username = "user@example.com"
-#smtp.sasl.scram-sha-256.password.raw = "***"
+# The backend blocks (`imap`, `smtp`, `jmap`, `gmail`, `msgraph`, `maildir`,
+# `mbox`, `pimdir`) are himalaya's: see its sample for every option.
+#maildir.root = "~/Mail"

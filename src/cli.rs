@@ -1,29 +1,23 @@
 //! # Parser
 //!
 //! Top-level CLI parser and the bridge into the interface:
-//! [`Cli::try_into_tui_model`] turns the parsed flags and the on-disk
-//! configuration, or the wizard, into a ready-to-run [`Model`].
+//! [`Cli::try_into_tui_model`] resolves the account through himalaya,
+//! reads the TUI's own keys beside it and opens the session, then loads
+//! the first screen before the interface takes the terminal.
 
-use std::{
-    env::temp_dir,
-    fs::File,
-    io::{IsTerminal, stdin},
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{env::temp_dir, fs::File, time::Instant};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use edtui::{EditorState, Lines};
+use himalaya::{account::context::Account, backend::Backend, cli::resolve_account};
 use pimalaya_cli::{
     clap::{
-        args::{JsonFlag, LogFlags},
-        commands::{CompletionCommand, ManualCommand},
-        parsers::path_parser,
+        args::{AccountFlag, ConfigFlags, JsonFlag, LogFlags},
+        commands::{completion::CompletionCommand, manual::ManualCommand},
     },
     footer, long_version,
     printer::Printer,
-    prompt,
     spinner::Spinner,
 };
 use pimalaya_config::toml::TomlConfig;
@@ -32,21 +26,14 @@ use simplelog::WriteLogger;
 use tui_input::Input;
 
 use crate::{
-    config::{AccountConfig, Config},
-    shared::client::EmailClient,
+    client::MailClient,
+    config::Config,
     tui::{
         model::{BottomPanel, Keybinds, Message, Model, Panel},
         theme::Theme,
         update, view,
     },
-    wizard,
 };
-
-/// RFC 3676 section 4.3 signature separator.
-///
-/// Written before the signature when neither the account nor the global
-/// configuration names one, matching the himalaya CLI's own default.
-const DEFAULT_SIGNATURE_DELIM: &str = "-- \n";
 
 #[derive(Parser, Debug)]
 #[command(name = env!("CARGO_PKG_NAME"))]
@@ -58,25 +45,16 @@ pub struct Cli {
     /// The command to run; a bare `himalaya-tui` opens the interface.
     #[command(subcommand)]
     pub command: Option<Command>,
-    /// Email address to configure an account from.
+    #[command(flatten)]
+    pub config: ConfigFlags,
+    #[command(flatten)]
+    pub account: AccountFlag,
+    /// Force a specific backend, as the himalaya CLI's `--backend` does.
     ///
-    /// Passing one skips the account lookup and runs the wizard on this
-    /// value, answering its first prompt: the quickest way to try a
-    /// server. A server URL and a local folder path work here too. The
-    /// rest of the file (theme, signature, keybindings) still applies,
-    /// and `--no-config` drops that too. Omitting both this and
-    /// `--account` opens the default account.
-    #[arg(value_name = "EMAIL", conflicts_with = "account")]
-    pub seed: Option<String>,
-    /// Account to open, as named in the configuration file.
-    ///
-    /// Defaults to the account flagged `default = true`. A name the file
-    /// cannot answer, holding no such account or being absent
-    /// altogether, is an error rather than a fallback to the wizard: use
-    /// the positional argument for that.
-    #[arg(long, short, value_name = "NAME")]
-    #[arg(conflicts_with_all = ["seed", "no_config"])]
-    pub account: Option<String>,
+    /// `auto`, the default, picks the first backend the account
+    /// configures, local before network.
+    #[arg(short, long, global = true, default_value_t)]
+    pub backend: Backend,
     /// Override the From address used when sending or saving drafts.
     #[arg(long, value_name = "EMAIL")]
     pub from: Option<String>,
@@ -90,26 +68,6 @@ pub struct Cli {
     /// when omitted, then to Vim.
     #[arg(long, value_name = "FLAVOR", value_enum)]
     pub keybinds: Option<Keybinds>,
-    /// Override the default configuration file path.
-    ///
-    /// Paths are shell-expanded then canonicalized. Multiple ones may be
-    /// delimited by `:` (like `$PATH` in a POSIX shell) and are merged
-    /// onto the first, which is how a public configuration stays apart
-    /// from private ones. When the first names no valid file, the run
-    /// falls back to the wizard, which offers to write one there.
-    #[arg(long = "config", short, global = true, env = "HIMALAYA_CONFIG")]
-    #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
-    pub config_paths: Vec<PathBuf>,
-    /// Skip the configuration file entirely and run the wizard.
-    ///
-    /// Useful when a configuration exists on disk but you want another
-    /// account for this run. Unlike the positional argument, this drops
-    /// the whole file, theme and signature included, and prints no
-    /// welcome. The file is not read, but `--config` and
-    /// `HIMALAYA_CONFIG` still name the one the wizard offers to file
-    /// its account in.
-    #[arg(long = "no-config")]
-    pub no_config: bool,
     #[command(flatten)]
     pub json: JsonFlag,
     #[command(flatten)]
@@ -117,10 +75,19 @@ pub struct Cli {
 }
 
 impl Cli {
-    /// Builds the interface model this invocation asks for.
+    /// Builds the interface model this invocation asks for, its first
+    /// screen loaded.
+    ///
+    /// Runs before the interface takes the terminal, so a secret command
+    /// prompting there asks on the plain terminal.
     pub fn try_into_tui_model(self) -> Result<Model> {
-        let mut spinner = Spinner::start("Loading…");
+        let spinner = Spinner::start("Loading…");
+        let model = self.build_model();
+        spinner.clear();
+        model
+    }
 
+    fn build_model(self) -> Result<Model> {
         WriteLogger::init(
             self.log.level.unwrap_or_default().into(),
             Default::default(),
@@ -130,91 +97,21 @@ impl Cli {
             })?,
         )?;
 
-        // NOTE: a run that asked for the wizard goes straight to its
-        // prompts. One that falls back to it says why: `welcome` carries
-        // the path a missing file was looked for at, `wizard_reason` the
-        // mistake the user can fix.
-        let asked_for_wizard = self.no_config || self.seed.is_some();
-        let mut welcome = None;
-        let mut wizard_reason = None;
+        let paths = self.config.paths;
 
-        // NOTE: a seed keeps the file for its globals (theme, signature,
-        // keybindings) and only swaps the account out.
-        let loaded = if self.no_config {
-            None
-        } else {
-            let loaded = Config::from_paths_or_default(&self.config_paths)?;
+        // NOTE: himalaya resolves the account, so a missing file or name
+        // fails with the CLI's own error, before anything is drawn.
+        let (config, account_name, account_config) =
+            resolve_account(&paths, self.account.name.as_deref())?;
+        let account = Account::from(config).merge(Account::from(account_config));
 
-            if loaded.is_none() && !asked_for_wizard {
-                let path = Config::target_path(&self.config_paths)?;
+        let mut tui = Config::load(&paths)?;
+        let tui_account = tui.accounts.remove(&account_name).unwrap_or_default();
 
-                if let Some(name) = &self.account {
-                    bail!(
-                        "No account `{name}`: there is no configuration file at {}",
-                        path.display()
-                    );
-                }
-
-                welcome = Some(path);
-            }
-
-            loaded
-        };
-
-        let mut display_name = None;
-        let mut signature = String::new();
-        let mut signature_delim = None;
-        let mut keybinds_config = None;
-        let mut contact_command = None;
-        let mut contact_complete_key = None;
-        let mut theme = Theme::default();
-
-        let mut account = None;
-        if let Some(mut config) = loaded {
-            display_name = config.display_name.take();
-            signature = config.signature.take().unwrap_or_default();
-            signature_delim = config.signature_delim.take();
-            keybinds_config = config.keybinds.take();
-            contact_command = config.contact_command.take();
-            contact_complete_key = config.contact_complete_key.take();
-            theme = Theme::resolve(&config.theme);
-
-            if !asked_for_wizard {
-                match config.take_account(self.account.as_deref())? {
-                    Some(named) => account = Some(named),
-                    None => {
-                        wizard_reason = Some(String::from(
-                            "Configuration file carries no default account, falling back to the wizard",
-                        ));
-                    }
-                }
-            }
-        }
-
-        let (account_name, mut account_config) = match account {
-            Some(named) => named,
-            None => {
-                match wizard_reason {
-                    Some(reason) => spinner.failure(reason),
-                    None => spinner.clear(),
-                }
-                let named =
-                    run_wizard(welcome.as_deref(), self.seed.as_deref(), &self.config_paths)?;
-                spinner = Spinner::start("Loading…");
-                named
-            }
-        };
-
-        let from = account_config.from.clone();
-        let from_name = account_config.from_name.take().or(display_name);
-        let signature = signature_block(
-            account_config.signature.take().unwrap_or(signature),
-            account_config.signature_delim.take().or(signature_delim),
-        );
-        let keybinds = self.keybinds.or(keybinds_config);
-        let contact_command = account_config.contact_command.take().or(contact_command);
-
-        let client = EmailClient::new(account_config)?;
+        let signature = signature_block(account.signature.as_deref(), account.signature_delim());
+        let keybinds = self.keybinds.or(tui.keybinds);
+        let contact_command = tui_account.contact_command.or(tui.contact_command);
+        let client = MailClient::new(paths, Some(account_name.clone()), self.backend);
 
         let mut model = Model {
             running: true,
@@ -229,11 +126,14 @@ impl Cli {
             envelope_page: 0,
             envelope_page_size: startup_page_size(),
             envelope_capacity: 0,
-            envelope_total: 0,
+            envelope_total: None,
+            envelope_has_next: false,
+            envelope_end: None,
+            marked: Vec::new(),
             selected_mailbox: None,
             account_name,
-            from,
-            from_name,
+            from: self.from.or(account.email),
+            from_name: self.from_name.or(account.display_name),
             signature,
             status_message: None,
             deferred: None,
@@ -246,24 +146,15 @@ impl Cli {
             dialog_index: 0,
             keybinds,
             contact_command,
-            contact_complete_key: contact_complete_key.unwrap_or_default(),
+            contact_complete_key: tui.contact_complete_key.unwrap_or_default(),
             contact_lookup: None,
             contact_completion: None,
-            theme,
+            theme: Theme::resolve(&tui.theme),
             client,
             last_activity: Instant::now(),
         };
 
-        if let Some(from) = self.from {
-            model.from = Some(from);
-        }
-
-        if let Some(from_name) = self.from_name {
-            model.from_name = Some(from_name);
-        }
-
         update::apply_all(&mut model, Some(Message::Initialize));
-        spinner.clear();
 
         Ok(model)
     }
@@ -287,44 +178,12 @@ fn startup_page_size() -> usize {
 /// at all. mml writes what it is given verbatim, so the separator is
 /// resolved here rather than expected inside the configured value: one
 /// file, one meaning, whichever binary composes.
-fn signature_block(signature: String, delim: Option<String>) -> String {
-    if signature.trim().is_empty() {
+fn signature_block(signature: Option<&str>, delim: &str) -> String {
+    let Some(signature) = signature.filter(|signature| !signature.trim().is_empty()) else {
         return String::new();
-    }
-
-    let delim = delim.unwrap_or_else(|| DEFAULT_SIGNATURE_DELIM.to_string());
+    };
 
     format!("{delim}{}", signature.trim_end_matches('\n'))
-}
-
-/// Runs the setup wizard, returning the account to open under the name
-/// it would be filed as.
-///
-/// `welcome` is set only when no configuration file was found, the one
-/// case the wizard introduces itself in. Declining leaves the run with
-/// nothing to open, so it stops there rather than opening onto no
-/// mailbox. A run that asked for the wizard skips both.
-fn run_wizard(
-    welcome: Option<&Path>,
-    seed: Option<&str>,
-    config_paths: &[PathBuf],
-) -> Result<(String, AccountConfig)> {
-    // NOTE: nobody answers a prompt without a terminal, and the wizard
-    // fails on that condition naming it.
-    if let Some(path) = welcome.filter(|_| stdin().is_terminal()) {
-        wizard::configure::print_welcome(path);
-
-        if !prompt::bool("Create a configuration with a default account?", true)? {
-            bail!(
-                "No account to open: write a configuration at {} by hand, \
-                 starting from the documented sample:\n  {}",
-                path.display(),
-                wizard::discover::CONFIG_SAMPLE_URL,
-            );
-        }
-    }
-
-    wizard::configure::run(seed, config_paths)
 }
 
 /// Auxiliary subcommands, the interface running when none is given.
@@ -355,13 +214,13 @@ mod tests {
     #[test]
     fn the_signature_block_carries_its_separator() {
         assert_eq!(
-            signature_block("Alice".to_string(), None),
+            signature_block(Some("Alice"), "-- \n"),
             "-- \nAlice",
-            "an unset delimiter falls back to the RFC separator",
+            "the RFC separator himalaya defaults to",
         );
 
         assert_eq!(
-            signature_block("Alice\n".to_string(), Some("~~~\n".to_string())),
+            signature_block(Some("Alice\n"), "~~~\n"),
             "~~~\nAlice",
             "the delimiter is written verbatim, its own newline included",
         );
@@ -369,12 +228,9 @@ mod tests {
 
     #[test]
     fn no_signature_means_no_block_at_all() {
-        assert_eq!(signature_block(String::new(), None), "");
+        assert_eq!(signature_block(None, "-- \n"), "");
         // NOTE: a delimiter alone is not a signature, or mml would
         // append a bare `-- ` to every draft.
-        assert_eq!(
-            signature_block("  \n".to_string(), Some("-- \n".to_string())),
-            "",
-        );
+        assert_eq!(signature_block(Some("  \n"), "-- \n"), "");
     }
 }

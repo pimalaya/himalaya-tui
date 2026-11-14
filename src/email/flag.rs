@@ -174,15 +174,6 @@ fn canonical_raw(iana: IanaFlag) -> &'static str {
     }
 }
 
-/// Direction of a flag store operation.
-///
-/// Both `Add` and `Remove` patch the message's existing flag set.
-#[derive(Clone, Copy, Debug)]
-pub enum FlagOp {
-    Add,
-    Remove,
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

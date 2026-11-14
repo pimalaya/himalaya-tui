@@ -1,12 +1,12 @@
 //! # Address
 //!
-//! An email address shared by every mail protocol.
+//! An email address, as himalaya prints one.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// A single email address with an optional display name.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Address {
     /// Display name (e.g. `Alice`), if any.
     pub name: Option<String>,

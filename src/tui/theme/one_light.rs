@@ -26,6 +26,7 @@ pub const THEME: Theme = Theme {
     envelope_header: Style::new().fg(ORANGE).add_modifier(Modifier::BOLD),
     envelope_seen: Style::new().fg(MONO_3),
     envelope_unread: Style::new().fg(MONO_1).add_modifier(Modifier::BOLD),
+    envelope_marked: Style::new().fg(ORANGE).add_modifier(Modifier::BOLD),
     message_body: Style::new().fg(MONO_1),
     compose_text: Style::new().fg(MONO_1),
     compose_cursor: Style::new().bg(MONO_1).fg(BG),

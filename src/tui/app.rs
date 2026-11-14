@@ -61,7 +61,24 @@ pub fn run(mut model: Model) -> Result<()> {
         // straight back to drawing its outcome rather than waiting for
         // a key.
         if let Some(deferred) = model.deferred.take() {
+            // NOTE: an action that connects first, the session having
+            // dropped its client after a failure, may run a secret
+            // command prompting on the terminal, which it gets back
+            // meanwhile, as the system editor does.
+            let connects = !model.client.is_connected();
+
+            if connects {
+                restore_terminal()?;
+            }
+
             update::apply_all(&mut model, Some(deferred));
+
+            if connects {
+                enable_raw_mode()?;
+                stdout().execute(EnterAlternateScreen)?;
+                terminal.clear()?;
+            }
+
             continue;
         }
 

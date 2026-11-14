@@ -12,15 +12,19 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/himalaya-tui"
 
 [features]
-default = ["rustls-ring", "imap", "smtp", "jmap", "maildir"]
-imap = ["dep:io-imap", "dep:nom", "io-imap/client", "pimalaya-cli/imap"]
-smtp = ["dep:io-smtp", "io-smtp/client", "pimalaya-cli/smtp"]
-jmap = ["dep:io-jmap", "dep:base64", "io-jmap/client", "pimalaya-cli/jmap"]
-maildir = ["dep:io-maildir", "io-maildir/client", "io-maildir/parser"]
-native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-imap?/native-tls", "io-jmap?/native-tls", "io-smtp?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-imap?/rustls-aws", "io-jmap?/rustls-aws", "io-smtp?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-imap?/rustls-ring", "io-jmap?/rustls-ring", "io-smtp?/rustls-ring"]
-vendored = ["pimalaya-stream/vendored"]
+default = ["rustls-ring", "imap", "smtp", "jmap", "gmail", "msgraph", "maildir", "mbox", "pimdir", "vendored"]
+imap = ["himalaya/imap"]
+smtp = ["himalaya/smtp"]
+jmap = ["himalaya/jmap"]
+gmail = ["himalaya/gmail"]
+msgraph = ["himalaya/msgraph"]
+maildir = ["himalaya/maildir"]
+mbox = ["himalaya/mbox"]
+pimdir = ["himalaya/pimdir"]
+native-tls = ["himalaya/native-tls"]
+rustls-aws = ["himalaya/rustls-aws"]
+rustls-ring = ["himalaya/rustls-ring"]
+vendored = ["himalaya/vendored"]
 
 [profile.release]
 lto = "fat"
@@ -29,45 +33,35 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.2", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
-base64 = { version = "0.23", optional = true, default-features = false, features = ["alloc"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
+clap = { version = "4.4", features = ["derive", "wrap_help"] }
 edtui = { version = "0.11", features = ["system-editor"] }
+himalaya = { version = "2.2", default-features = false }
 html2text = "0.17"
-io-imap = { version = "0.6", default-features = false, optional = true }
-# NOTE: imap-codec 2.0.0-alpha.9, under io-imap 0.6, uses nom's alloc parsers
-# without asking for the feature, which abnf-core 0.6.1 no longer turns on for
-# it. Never imported, this entry restores the feature until io-imap or
-# imap-codec releases its own fix.
-nom = { version = "7", default-features = false, features = ["alloc"], optional = true }
-io-jmap = { version = "0.3", default-features = false, optional = true }
-io-maildir = { version = "0.3", default-features = false, optional = true }
-io-pim-discovery = { version = "0.8", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "rfc8620"] }
-io-sasl = { version = "0.1", default-features = false, features = ["scram"] }
-io-smtp = { version = "0.4", default-features = false, optional = true }
 log = "0.4"
 mime-meta-language = { version = "1.1", default-features = false, features = ["compiler", "interpreter"] }
-mime-rs = { version = "0.0.1", git = "https://github.com/pimalaya/mime-rs", rev = "d7ea03296a197647a6effeb593a8528b47bdb0ed" }
-pimalaya-cli = { version = "0.2", default-features = false, features = ["prompt", "wizard", "spinner", "terminal"] }
-pimalaya-config = { version = "0.2.1", default-features = false, features = ["toml", "secret"] }
-pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }
+mime-rs = { version = "0.1", default-features = false, features = ["base64", "encoding", "parser"] }
+pimalaya-cli = { version = "0.4", default-features = false, features = ["spinner", "terminal"] }
+pimalaya-config = { version = "0.4", default-features = false, features = ["toml", "secret"] }
 ratatui = { version = "0.30", features = ["serde"] }
-rfc2047-decoder = "1"
-secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
-shellexpand = "3.1"
+serde_json = "1"
+simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 simplelog = "0.12"
+tempfile = "3"
 toml = "1.1"
 tui-input = { version = "0.15", default-features = false }
-url = { version = "2.2", features = ["serde"] }
-
-[target.'cfg(windows)'.dependencies]
-uds_windows = "1"
 
 [patch.crates-io]
+himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "d70fb8d11cf9d7d66b1cda8f2e8bb5270acd0da2" }
+io-gmail = { git = "https://github.com/pimalaya/io-gmail", rev = "3dc66be58f95a136e8c722a745eb8cae1c17e316" }
+io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "da85d95e7155da62e5de9359d50f7caeca5edc50" }
+io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "26a77bbba0c3a52d5f681e0fe149385cbf4dc74a" }
+io-maildir = { git = "https://github.com/pimalaya/io-maildir", rev = "babeeb04eb50aa3c8a535d1b1fc1c5e547ba6088" }
 mime-meta-language.git = "https://github.com/pimalaya/mml"
-pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "55b66933950f02541892407667e5e0b254245871" }
+mime-rs = { git = "https://github.com/pimalaya/mime", rev = "2591e7fec9e3dd8b995d47323c6fa8868c558857" }
+pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "0be1b1f08d19ccb9d16ee8e1d4266c27c96e0cdd" }

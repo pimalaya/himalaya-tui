@@ -26,6 +26,7 @@ pub const THEME: Theme = Theme {
     envelope_header: Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
     envelope_seen: Style::new().fg(Color::Gray),
     envelope_unread: Style::new().add_modifier(Modifier::BOLD),
+    envelope_marked: Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD),
     message_body: Style::new().fg(Color::White),
     compose_text: Style::new().fg(Color::White),
     compose_cursor: Style::new().bg(Color::White).fg(Color::Black),

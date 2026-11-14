@@ -29,22 +29,12 @@
 
 ## Features
 
-- **IMAP**, **SMTP**, **JMAP** support
-- **Maildir** <sup>[specs](https://cr.yp.to/proto/maildir.html)</sup> support
-- **Simple auth** support for IMAP and SMTP (anonymous, login, plain, oauthbearer, xoauth2, scram-sha-256)
-- **HTTP auth** support for JMAP: basic, bearer
+- **A frontend of the [himalaya](https://github.com/pimalaya/himalaya) CLI**: it runs himalaya's own commands in-process, so every backend, option and behaviour of the CLI is the TUI's too
+- **IMAP**, **SMTP**, **JMAP**, **Gmail API**, **Microsoft Graph**, **Maildir**, **mbox** and **pimdir** backends, each behind the cargo feature of the same name
 - **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
-- **Discovery** support:
-  - Known provider rules
-  - PACC <sup>[specs](https://datatracker.ietf.org/doc/html/draft-ietf-mailmaint-pacc)</sup>
-  - Autoconfiguration (Thunderbird) <sup>[specs](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)</sup>
-  - SRV DNS lookups <sup>[rfc6186](https://datatracker.ietf.org/doc/html/rfc6186)</sup>
-  - JMAP session resolution <sup>[rfc8620](https://datatracker.ietf.org/doc/html/rfc8620)</sup>
-- **SOCKS5**, **HTTP** proxy support via `all_proxy`, `https_proxy` and `no_proxy`
-- **Interactive wizard** turning an email address into a tested account, shared with the himalaya CLI
 - **Three-pane layout**: mailboxes, envelopes, message body or composer
 - **In-app composer** with system-editor handoff
 - **Recipient completion** from any contact command (khard, abook, notmuch-address, [Cardamum](https://github.com/pimalaya/cardamum)…)
@@ -101,9 +91,7 @@ nix run
 
 ## Configuration
 
-Run `himalaya-tui`. With no account to open, the wizard asks for an email address, searches the services reachable from it, prompts the authentication the chosen one advertised, tests the connection, then offers to write the resulting `[accounts.<name>]` block to disk.
-
-Declining opens the account for that session alone. Ask for the wizard on a configured run with `--no-config`, or pass an address as the positional argument to answer its first prompt. Discovery resolves DNS through the host's own resolver, overridable with `HIMALAYA_DNS_RESOLVER=<URL>`.
+The configuration is the [himalaya](https://github.com/pimalaya/himalaya) CLI's: the TUI runs himalaya's own commands, so an account, its backends, credentials, mailbox aliases and sent copy are configured once, as [himalaya's sample](https://github.com/pimalaya/himalaya/blob/master/config.sample.toml) documents them. The TUI adds a few keys of its own (composer keybindings, contact command, theme), documented in [config.sample.toml](./config.sample.toml), which himalaya ignores.
 
 A configuration is loaded from the first valid path among:
 
@@ -111,11 +99,9 @@ A configuration is loaded from the first valid path among:
 - `$HOME/.config/himalaya/config.toml`
 - `$HOME/.himalayarc`
 
-These are the same paths the [himalaya](https://github.com/pimalaya/himalaya) CLI looks at: one TOML file backs both binaries, starting from himalaya CLI v2. TUI-only fields and CLI-only sections coexist without errors.
+Override the path with `-c <PATH>`, repeated to merge several files: the first one is the base and the next ones are deep-merged on top.
 
-Override the path with `-c <PATH>` or `HIMALAYA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first one is the base and the rest are deep-merged on top. The full field reference lives in [config.sample.toml](./config.sample.toml).
-
-Pick the account to open with `-a <NAME>`, or let the one flagged `default = true` be used. An unknown name is an error listing the accounts the file does hold.
+Pick the account to open with `-a <NAME>`, or let the one flagged `default = true` be used, and its backend with `-b <BACKEND>` as on the CLI. An unknown name is an error listing the accounts the file does hold. With no configuration at all, the TUI stops before drawing anything, naming the path it looked at and the sample to start from: write the file by hand for now, an onboarding comes later.
 
 > [!WARNING]
 > A himalaya CLI v1 configuration file is not compatible with himalaya TUI: the v1 schema differs from the v2 one shared with the TUI. Upgrade the CLI to v2 (or rewrite the file using [config.sample.toml](./config.sample.toml)) before pointing the TUI at it.
@@ -124,10 +110,7 @@ Pick the account to open with `-a <NAME>`, or let the one flagged `default = tru
 
 The account blocks are the ones the CLI documents, so the ready-made configurations for Proton Mail, Fastmail, Gmail, Outlook, Posteo and iCloud Mail live once, in the [himalaya Configuration section](https://github.com/pimalaya/himalaya#configuration), and apply verbatim here.
 
-Only the CLI-only keys around them are ignored.
-
-> [!IMPORTANT]
-> The TUI only speaks IMAP, JMAP and Maildir (plus SMTP for sending). The other backend blocks the CLI accepts (`gmail`, `msgraph`, `mbox`, `m2dir`, `pimdir`) are ignored, so the Gmail API and Microsoft Graph variants of the recipes do not work here yet: keep the `imap` and `smtp` blocks in the account for the TUI to use.
+Every variant works here, the Gmail API and Microsoft Graph ones included.
 
 ### Theming
 
@@ -167,6 +150,8 @@ Top-level navigation, supporting Vim and Emacs keybinds:
 | `Enter` | Select |
 | `Esc`, `q`, `Ctrl-g` | Close panel / dialog / quit |
 | `Ctrl-c` | Start a new draft |
+| `Space` | Mark the envelope for an action, then move down |
+| `Delete` | Delete the marked envelopes, or the selected one |
 
 The envelope list is paged one screenful at a time, and the panel names the page it is on when the mailbox holds more than one. A page is therefore never half off screen, and it is re-cut around the selected envelope when the terminal is resized.
 
@@ -183,13 +168,17 @@ The `--keybinds <vim|emacs>` flag, and the top-level `keybinds = "emacs"` TOML f
 
 In Vim mode `Ctrl-e` opens the external editor, edtui binding it in normal mode. In Emacs mode `Ctrl-e` moves to the end of the line instead, leaving `Alt-e` as the only system-editor key.
 
-Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag.
+Envelope dialog actions: Read, Reply, Reply All, Forward, Copy, Move, Add flag, Remove flag, Delete.
+
+Copy, Move, the flag actions and Delete reach every marked envelope, across pages, or the selected one when none is marked; `Esc` clears the marks first. After an action, the envelopes it could not reach stay marked and the status bar names the first failure.
+
+Delete moves the messages to the trash (`mailbox.alias.trash`, else the mailbox the backend marks as such), and asks before removing them for good when they already are in it.
 
 ### Composing messages
 
 Drafts are written in [MML](https://github.com/pimalaya/mml) and compiled to MIME on send. Headers (`From`, `To`, `Subject`…) live at the top of the buffer, then the body and any MML directives (attachments, signing, encryption).
 
-Sending routes through the storage backend when it can send on its own (JMAP), otherwise through the `[accounts.<name>.smtp]` transport, which connects on the first send rather than at startup. Drafts can be saved to the `Drafts` mailbox at any time.
+Sending goes through himalaya's `message send`: through the storage backend when it can send on its own (JMAP, Gmail, Microsoft Graph), otherwise through the `[accounts.<name>.smtp]` transport, which connects on the first send. A copy is saved where `message.send.save-copy` says, as on the CLI. Drafts can be saved at any time to the account's drafts mailbox, its `mailbox.alias.drafts` else the one the backend marks as such.
 
 ### Re-using sessions
 

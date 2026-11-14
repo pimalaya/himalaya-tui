@@ -7,7 +7,7 @@
 //! All I/O goes through `model.client`: the model is the sole owner of
 //! both the UI state and the email client.
 
-use std::{borrow::Cow, slice, time::Instant};
+use std::{borrow::Cow, time::Instant};
 
 use anyhow::Result;
 use edtui::{
@@ -27,11 +27,9 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui_input::InputRequest;
 
 use crate::{
+    client::{DeleteAction, DeleteReceipt, Receipt},
     contact::{Contact, ContactLookup, ContactTarget},
-    email::{
-        flag::{Flag, FlagOp, IanaFlag},
-        mailbox::Mailbox,
-    },
+    email::mailbox::Mailbox,
     tui::model::{
         Blocking, BottomPanel, ComposeAction, ContactCompletion, Dialog, EnvelopeAction,
         EnvelopeLanding, FlagAction, MAILBOX_DIALOG_VISIBLE, Message, Model, Panel,
@@ -56,8 +54,8 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::Initialize => Some(Message::LoadMailboxes),
 
         Message::Ping => {
-            if let Err(err) = model.client.ping() {
-                log::warn!("Ping failed: {err}");
+            if let Err(err) = model.client.keep_alive() {
+                log::warn!("Keepalive failed: {err}");
             }
             model.last_activity = Instant::now();
             None
@@ -66,6 +64,10 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::TogglePanel => {
             toggle_panel(model);
             None
+        }
+        Message::ToggleMark => {
+            toggle_mark(model);
+            next_item(model)
         }
         Message::Next => next_item(model),
         Message::Previous => previous_item(model),
@@ -171,6 +173,7 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
         Message::CopySelectedToTarget => announce(model, Blocking::Copy),
         Message::MoveSelectedToTarget => announce(model, Blocking::Move),
         Message::FlagSelected { add } => announce(model, Blocking::Flag { add }),
+        Message::DeleteSelected => start_delete(model),
         Message::SendCompose => announce(model, Blocking::Send),
         Message::PreviewCompose => {
             do_preview(model);
@@ -195,6 +198,7 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
                 Blocking::Copy => do_copy(model),
                 Blocking::Move => do_move(model),
                 Blocking::Flag { add } => do_flag(model, add),
+                Blocking::Delete => do_delete(model),
                 Blocking::Send => do_send(model),
                 Blocking::SaveDraft => do_save_draft(model),
             }
@@ -227,6 +231,7 @@ fn announce(model: &mut Model, blocking: Blocking) -> Option<Message> {
             let label = model.selected_flag_action().label();
             Some(format!("{verb} flag {label}…"))
         }
+        Blocking::Delete => Some(format!("Deleting {}…", messages(model.action_ids().len()))),
         Blocking::Send => Some(String::from("Sending message…")),
         Blocking::SaveDraft => Some(String::from("Saving to Drafts…")),
     };
@@ -312,6 +317,8 @@ fn translate_key(model: &Model, key: KeyEvent) -> Option<Message> {
         KeyCode::PageDown => Some(Message::PageDown),
         KeyCode::PageUp => Some(Message::PageUp),
         KeyCode::Enter => Some(Message::Enter),
+        KeyCode::Char(' ') if model.active_panel == Panel::Envelopes => Some(Message::ToggleMark),
+        KeyCode::Delete if model.active_panel == Panel::Envelopes => Some(Message::DeleteSelected),
         _ => None,
     }
 }
@@ -455,6 +462,10 @@ fn esc_cascade(model: &mut Model) -> Option<Message> {
         open_dialog(model, Dialog::Compose);
         return None;
     }
+    if model.active_panel == Panel::Envelopes && !model.marked.is_empty() {
+        model.marked.clear();
+        return None;
+    }
     if model.bottom_panel == BottomPanel::MessagePreview {
         close_preview(model);
         return None;
@@ -552,7 +563,10 @@ fn select_mailbox(model: &mut Model) {
     model.envelope_index = 0;
     model.envelope_offset = 0;
     model.envelope_page = 0;
-    model.envelope_total = 0;
+    model.envelope_total = None;
+    model.envelope_has_next = false;
+    model.envelope_end = None;
+    model.marked.clear();
     model.envelopes.clear();
     close_bottom_panel(model);
     model.active_panel = Panel::Envelopes;
@@ -564,7 +578,10 @@ fn unselect_mailbox(model: &mut Model) {
     model.envelope_index = 0;
     model.envelope_offset = 0;
     model.envelope_page = 0;
-    model.envelope_total = 0;
+    model.envelope_total = None;
+    model.envelope_has_next = false;
+    model.envelope_end = None;
+    model.marked.clear();
     close_bottom_panel(model);
     model.active_panel = Panel::Mailboxes;
 }
@@ -604,7 +621,7 @@ pub fn adopt_envelope_capacity(model: &mut Model) -> Option<Message> {
 }
 
 fn next_envelope_page(model: &mut Model) -> bool {
-    if model.envelope_page + 1 < model.total_pages() {
+    if model.has_next_page() {
         model.envelope_page += 1;
         true
     } else {
@@ -618,27 +635,6 @@ fn prev_envelope_page(model: &mut Model) -> bool {
         true
     } else {
         false
-    }
-}
-
-fn remove_selected_envelope(model: &mut Model) {
-    if model.envelope_index < model.envelopes.len() {
-        model.envelopes.remove(model.envelope_index);
-        if model.envelope_index >= model.envelopes.len() && model.envelope_index > 0 {
-            model.envelope_index -= 1;
-        }
-    }
-}
-
-fn flag_selected_envelope(model: &mut Model, flag: Flag) {
-    if let Some(envelope) = model.envelopes.get_mut(model.envelope_index) {
-        envelope.flags.insert(flag);
-    }
-}
-
-fn unflag_selected_envelope(model: &mut Model, flag: Flag) {
-    if let Some(envelope) = model.envelopes.get_mut(model.envelope_index) {
-        envelope.flags.remove(&flag);
     }
 }
 
@@ -703,6 +699,7 @@ fn dialog_confirm(model: &mut Model) -> Option<Message> {
                     open_dialog(model, Dialog::FlagRemove);
                     None
                 }
+                EnvelopeAction::Delete => Some(Message::DeleteSelected),
             }
         }
         Dialog::Compose => {
@@ -718,6 +715,16 @@ fn dialog_confirm(model: &mut Model) -> Option<Message> {
         Dialog::MoveTo => Some(Message::MoveSelectedToTarget),
         Dialog::FlagAdd => Some(Message::FlagSelected { add: true }),
         Dialog::FlagRemove => Some(Message::FlagSelected { add: false }),
+        Dialog::ConfirmDelete => {
+            let confirmed = model.dialog_index == 0;
+            close_dialog(model);
+
+            if confirmed {
+                announce(model, Blocking::Delete)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -854,7 +861,7 @@ fn cancel_compose(model: &mut Model) {
 }
 
 fn load_mailboxes(model: &mut Model) -> Option<Message> {
-    let result = model.client.list_mailboxes(false);
+    let result = model.client.list_mailboxes();
     match result {
         Ok(mailboxes) => {
             let was_empty = mailboxes.is_empty();
@@ -874,33 +881,46 @@ fn load_mailboxes(model: &mut Model) -> Option<Message> {
 
 /// Loads the current page of the selected mailbox, selecting `landing`.
 ///
-/// The total comes from the backend, not from the page, which cannot tell
-/// a full page from the end of the mailbox.
-fn load_envelopes(model: &mut Model, landing: EnvelopeLanding) {
+/// The page count comes from the total himalaya reports, not from the
+/// page, which cannot tell a full page from the end of the mailbox. A
+/// page past the first coming back empty, which a full last page leads
+/// to when no total says where the mailbox ends, or which a move leaves
+/// behind, is the end: the page before it is loaded instead and marked
+/// the last.
+fn load_envelopes(model: &mut Model, mut landing: EnvelopeLanding) {
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
+    let size = model.envelope_page_size;
 
-    let page = Some(model.envelope_page as u32 + 1);
-    let page_size = Some(model.envelope_page_size as u32);
+    loop {
+        let page = model.envelope_page + 1;
 
-    let result = model
-        .client
-        .list_envelopes(&mailbox, page, page_size, false);
-    match result {
-        Ok(list) => {
-            model.envelopes = list.envelopes;
-            model.envelope_total = list.total;
-            let last = model.envelopes.len().saturating_sub(1);
-            model.envelope_index = match landing {
-                EnvelopeLanding::First => 0,
-                EnvelopeLanding::Last => last,
-                EnvelopeLanding::Index(index) => index.min(last),
-            };
-            model.envelope_offset = 0;
-            model.status_message = None;
+        match model.client.list_envelopes(&mailbox, page, size) {
+            Ok(list) if list.envelopes.is_empty() && model.envelope_page > 0 => {
+                model.envelope_end = Some(model.envelope_page);
+                model.envelope_page -= 1;
+                landing = EnvelopeLanding::Last;
+            }
+            Ok(list) => {
+                model.envelopes = list.envelopes;
+                model.envelope_total = list.total;
+                model.envelope_has_next = list.next_page.is_some();
+                let last = model.envelopes.len().saturating_sub(1);
+                model.envelope_index = match landing {
+                    EnvelopeLanding::First => 0,
+                    EnvelopeLanding::Last => last,
+                    EnvelopeLanding::Index(index) => index.min(last),
+                };
+                model.envelope_offset = 0;
+                model.status_message = list.errors.first().map(|err| format!("Error: {err}"));
+                return;
+            }
+            Err(e) => {
+                set_status(model, format!("Error: {e}"));
+                return;
+            }
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
     }
 }
 
@@ -912,7 +932,7 @@ fn read_selected(model: &mut Model) {
         return;
     };
 
-    let result = model.client.get_message(&mailbox, &envelope.id);
+    let result = model.client.read_message(&mailbox, &envelope.id);
     match result {
         Ok(raw) => match decode_message_body(&raw) {
             Ok(content) => show_message(model, content),
@@ -930,7 +950,7 @@ fn fetch_for_reply(model: &mut Model, reply_all: bool) {
         return;
     };
 
-    let result = model.client.get_message(&mailbox, &envelope.id);
+    let result = model.client.read_message(&mailbox, &envelope.id);
     match result {
         Ok(raw) => start_reply(model, &raw, reply_all),
         Err(e) => set_status(model, format!("Error: {e}")),
@@ -945,7 +965,7 @@ fn fetch_for_forward(model: &mut Model) {
         return;
     };
 
-    let result = model.client.get_message(&mailbox, &envelope.id);
+    let result = model.client.read_message(&mailbox, &envelope.id);
     match result {
         Ok(raw) => start_forward(model, &raw),
         Err(e) => set_status(model, format!("Error: {e}")),
@@ -959,22 +979,30 @@ fn do_copy(model: &mut Model) {
         .map(|m| (**m).clone());
     close_dialog(model);
     let Some(target) = target else { return };
-    let Some(envelope) = model.selected_envelope().cloned() else {
-        return;
-    };
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
+    let ids = model.action_ids();
+    if ids.is_empty() {
+        return;
+    }
 
-    let result = model
-        .client
-        .copy_messages(&mailbox, &target.id, &[&envelope.id]);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let result = model.client.copy_messages(&mailbox, &target.id, &refs);
     match result {
-        Ok(()) => set_status(model, "Copied"),
+        Ok(receipt) => {
+            settle_marks(model, &receipt);
+            set_status(
+                model,
+                receipt_status(|n| format!("Copied {n}"), &receipt, ids.len()),
+            );
+        }
         Err(e) => set_status(model, format!("Error: {e}")),
     }
 }
 
+/// Moves the marked envelopes, or the focused one, then lists the page
+/// again: the move took rows from it, maybe from other pages too.
 fn do_move(model: &mut Model) {
     let target = model
         .filtered_mailboxes()
@@ -982,20 +1010,28 @@ fn do_move(model: &mut Model) {
         .map(|m| (**m).clone());
     close_dialog(model);
     let Some(target) = target else { return };
-    let Some(envelope) = model.selected_envelope().cloned() else {
-        return;
-    };
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
+    let ids = model.action_ids();
+    if ids.is_empty() {
+        return;
+    }
 
-    let result = model
-        .client
-        .move_messages(&mailbox, &target.id, &[&envelope.id]);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let result = model.client.move_messages(&mailbox, &target.id, &refs);
     match result {
-        Ok(()) => {
-            remove_selected_envelope(model);
-            set_status(model, "Moved");
+        Ok(receipt) => {
+            settle_marks(model, &receipt);
+
+            if receipt.count > 0 {
+                load_envelopes(model, EnvelopeLanding::Index(model.envelope_index));
+            }
+
+            set_status(
+                model,
+                receipt_status(|n| format!("Moved {n}"), &receipt, ids.len()),
+            );
         }
         Err(e) => set_status(model, format!("Error: {e}")),
     }
@@ -1005,31 +1041,128 @@ fn do_flag(model: &mut Model, add: bool) {
     let action: FlagAction = model.selected_flag_action();
     close_dialog(model);
 
-    let Some(envelope) = model.selected_envelope().cloned() else {
-        return;
-    };
     let Some(mailbox) = model.selected_mailbox.clone() else {
         return;
     };
+    let ids = model.action_ids();
+    if ids.is_empty() {
+        return;
+    }
 
     let flag = action.flag();
     let label = action.label();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
 
-    let op = if add { FlagOp::Add } else { FlagOp::Remove };
     let result = model
         .client
-        .store_flags(&mailbox, &[&envelope.id], slice::from_ref(&flag), op);
+        .flag_messages(&mailbox, action.name(), add, &refs);
 
     match result {
-        Ok(()) if add => {
-            flag_selected_envelope(model, flag);
-            set_status(model, format!("Flag {label} added"));
-        }
-        Ok(()) => {
-            unflag_selected_envelope(model, flag);
-            set_status(model, format!("Flag {label} removed"));
+        Ok(receipt) => {
+            let failed = failed_ids(&receipt);
+
+            for envelope in &mut model.envelopes {
+                if !ids.contains(&envelope.id) || failed.contains(&envelope.id.as_str()) {
+                    continue;
+                }
+
+                if add {
+                    envelope.flags.insert(flag.clone());
+                } else {
+                    envelope.flags.remove(&flag);
+                }
+            }
+
+            settle_marks(model, &receipt);
+
+            let verb = if add { "added to" } else { "removed from" };
+            let done = |n| format!("Flag {label} {verb} {n}");
+            set_status(model, receipt_status(done, &receipt, ids.len()));
         }
         Err(e) => set_status(model, format!("Error: {e}")),
+    }
+}
+
+/// Starts a delete of the marked envelopes, or the focused one: straight
+/// away outside the trash, where it moves them there, after a confirmation
+/// in the trash, where it removes them for good.
+fn start_delete(model: &mut Model) -> Option<Message> {
+    if model.action_ids().is_empty() {
+        return None;
+    }
+
+    if model.selected_mailbox_role() == Some("trash") {
+        open_dialog(model, Dialog::ConfirmDelete);
+        return None;
+    }
+
+    announce(model, Blocking::Delete)
+}
+
+/// Deletes the marked envelopes, or the focused one, trash first, then
+/// lists the page again.
+fn do_delete(model: &mut Model) {
+    let Some(mailbox) = model.selected_mailbox.clone() else {
+        return;
+    };
+    let ids = model.action_ids();
+    if ids.is_empty() {
+        return;
+    }
+
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let result = model.client.delete_messages(&mailbox, &refs);
+    match result {
+        Ok(DeleteReceipt { action, receipt }) => {
+            settle_marks(model, &receipt);
+
+            if receipt.count > 0 {
+                load_envelopes(model, EnvelopeLanding::Index(model.envelope_index));
+            }
+
+            let done = |n| match action {
+                DeleteAction::MovedToTrash => format!("Moved {n} to the trash"),
+                DeleteAction::Deleted => format!("Deleted {n} for good"),
+                DeleteAction::Flagged => {
+                    format!("Flagged {n} deleted, the server expunges them later")
+                }
+            };
+            set_status(model, receipt_status(done, &receipt, ids.len()));
+        }
+        Err(e) => set_status(model, format!("Error: {e}")),
+    }
+}
+
+/// Unmarks the envelopes a command acted on, keeping marked the ones its
+/// `errors` name, so a partial action can be retried on what failed.
+fn settle_marks(model: &mut Model, receipt: &Receipt) {
+    let failed = failed_ids(receipt);
+    model.marked.retain(|id| failed.contains(&id.as_str()));
+}
+
+/// The ids a receipt's `errors` name.
+fn failed_ids(receipt: &Receipt) -> Vec<&str> {
+    receipt
+        .errors
+        .iter()
+        .filter_map(|err| err.id.as_deref())
+        .collect()
+}
+
+/// Toggles the mark of the focused envelope.
+fn toggle_mark(model: &mut Model) {
+    let Some(id) = model
+        .selected_envelope()
+        .map(|envelope| envelope.id.clone())
+    else {
+        return;
+    };
+
+    match model.marked.iter().position(|marked| *marked == id) {
+        Some(index) => {
+            model.marked.remove(index);
+        }
+        None => model.marked.push(id),
     }
 }
 
@@ -1043,10 +1176,15 @@ fn do_send(model: &mut Model) {
         }
     };
 
-    let result = model.client.send_message(mime_bytes);
+    let result = model.client.send_message(&mime_bytes);
     match result {
-        Ok(()) => {
-            set_status(model, "Message sent");
+        Ok(receipt) => {
+            let status = match (receipt.queued, receipt.saved) {
+                (true, _) => "Message queued for sending",
+                (false, true) => "Message sent, a copy saved",
+                (false, false) => "Message sent",
+            };
+            set_status(model, status);
             cancel_compose(model);
         }
         Err(e) => set_status(model, format!("Send error: {e}")),
@@ -1073,24 +1211,50 @@ fn do_preview(model: &mut Model) {
 
 fn do_save_draft(model: &mut Model) {
     // NOTE: the buffer is saved verbatim (raw MML, partial headers)
-    // because a draft is unfinished by nature. IMAP APPEND requires CRLF
-    // and edtui emits bare \n, so collapse to \n first to avoid doubling
-    // an existing \r\n.
-    let raw = model
-        .compose_content()
-        .replace("\r\n", "\n")
-        .replace('\n', "\r\n")
-        .into_bytes();
+    // because a draft is unfinished by nature; himalaya makes its line
+    // endings CRLF.
+    let raw = model.compose_content().into_bytes();
 
-    let result = model
-        .client
-        .add_message("Drafts", &[Flag::from_iana(IanaFlag::Draft)], raw);
+    let result = model.client.save_draft(&raw);
     match result {
-        Ok(_) => {
-            set_status(model, "Saved to Drafts");
+        Ok(receipt) => {
+            set_status(
+                model,
+                queued(String::from("Saved to drafts"), receipt.queued),
+            );
             cancel_compose(model);
         }
         Err(e) => set_status(model, format!("Error: {e}")),
+    }
+}
+
+/// The status line of a write on `asked` messages: `done` phrasing how
+/// many it acted on (`1 message`, `2 of 3 messages`), then the first one
+/// it could not act on.
+fn receipt_status(done: impl Fn(String) -> String, receipt: &Receipt, asked: usize) -> String {
+    let Some(err) = receipt.errors.first() else {
+        let status = done(messages(receipt.count));
+        return queued(status, receipt.queued);
+    };
+
+    let status = done(format!("{} of {}", receipt.count, messages(asked)));
+    format!("{}, error: {err}", queued(status, receipt.queued))
+}
+
+/// `n message(s)`.
+fn messages(count: usize) -> String {
+    match count {
+        1 => String::from("1 message"),
+        count => format!("{count} messages"),
+    }
+}
+
+/// `status`, saying a sync engine applies it later when `queued`.
+fn queued(status: String, queued: bool) -> String {
+    if queued {
+        format!("{status} (queued for the next sync)")
+    } else {
+        status
     }
 }
 
@@ -1141,7 +1305,16 @@ fn part_text(part: &MimeEntity) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_message_body;
+    use std::fs;
+
+    use himalaya::backend::Backend;
+    use tempfile::TempDir;
+
+    use super::{apply_all, decode_message_body};
+    use crate::{
+        client::MailClient,
+        tui::model::{Blocking, Dialog, Message, Model, Panel},
+    };
 
     /// A text part is transfer-decoded and transcoded from its charset.
     #[test]
@@ -1214,5 +1387,244 @@ mod tests {
         let body = decode_message_body(raw.as_bytes()).unwrap();
 
         assert_eq!(body, "Hello world\n");
+    }
+
+    /// A Maildir account whose inbox holds `count` messages, and the
+    /// model over it with the first page of `page_size` loaded.
+    fn loaded(count: usize, page_size: usize) -> (TempDir, Model) {
+        loaded_with(count, page_size, true)
+    }
+
+    /// [`loaded`], with a `Trash` folder aliased as the trash or none.
+    fn loaded_with(count: usize, page_size: usize, trash: bool) -> (TempDir, Model) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("mail");
+
+        for folder in [root.clone(), root.join("Archive"), root.join("Trash")] {
+            for sub in ["cur", "new", "tmp"] {
+                fs::create_dir_all(folder.join(sub)).unwrap();
+            }
+        }
+
+        for n in 1..=count {
+            let message = format!(
+                "From: a@localhost\r\nSubject: {n}\r\nDate: Mon, 1 Jan 2024 00:00:{n:02} +0000\r\n\r\nbody\r\n"
+            );
+            fs::write(root.join("cur").join(format!("{n}:2,")), message).unwrap();
+        }
+
+        let config = dir.path().join("config.toml");
+        let toml = format!(
+            "[accounts.test]\ndefault = true\nmaildir.root = {:?}\n",
+            root.display().to_string(),
+        );
+        let toml = if trash {
+            toml + "mailbox.alias.trash = \"Trash\"\n"
+        } else {
+            toml
+        };
+        fs::write(&config, toml).unwrap();
+
+        let client = MailClient::new(vec![config], None, Backend::Auto);
+        let mut model = Model::for_tests(client, page_size);
+        run(&mut model, Message::Initialize);
+        model.active_panel = Panel::Envelopes;
+
+        (dir, model)
+    }
+
+    /// Applies `msg`, then every action it deferred.
+    fn run(model: &mut Model, msg: Message) {
+        apply_all(model, Some(msg));
+
+        while let Some(deferred) = model.deferred.take() {
+            apply_all(model, Some(deferred));
+        }
+    }
+
+    /// Moves what an action reaches to `Archive`.
+    fn move_to_archive(model: &mut Model) {
+        model.dialog = Some(Dialog::MoveTo);
+        model.dialog_index = model
+            .filtered_mailboxes()
+            .iter()
+            .position(|mailbox| mailbox.name == "Archive")
+            .unwrap();
+        run(model, Message::Run(Blocking::Move));
+    }
+
+    fn archived(model: &mut Model) -> usize {
+        model
+            .client
+            .list_envelopes("Archive", 1, 50)
+            .unwrap()
+            .envelopes
+            .len()
+    }
+
+    #[test]
+    fn marks_cross_pages_and_one_move_carries_them_all() {
+        let (_dir, mut model) = loaded(3, 2);
+        assert_eq!(model.envelopes.len(), 2);
+
+        run(&mut model, Message::ToggleMark);
+        run(&mut model, Message::ToggleMark);
+        assert_eq!(model.envelope_page, 1, "the second mark moved onto page 2");
+
+        run(&mut model, Message::ToggleMark);
+        assert_eq!(model.marked.len(), 3);
+
+        move_to_archive(&mut model);
+
+        assert_eq!(archived(&mut model), 3);
+        assert!(model.marked.is_empty());
+        assert_eq!(model.status_message.as_deref(), Some("Moved 3 messages"));
+    }
+
+    #[test]
+    fn a_partial_move_keeps_what_failed_marked() {
+        let (dir, mut model) = loaded(2, 10);
+
+        run(&mut model, Message::ToggleMark);
+        run(&mut model, Message::ToggleMark);
+        let gone = model.marked[1].clone();
+        fs::remove_file(dir.path().join("mail/cur").join(format!("{gone}:2,"))).unwrap();
+
+        move_to_archive(&mut model);
+
+        assert_eq!(model.marked, [gone]);
+        let status = model.status_message.clone().unwrap();
+        assert!(
+            status.starts_with("Moved 1 of 2 messages, error: "),
+            "{status}"
+        );
+    }
+
+    #[test]
+    fn a_flag_reaches_every_marked_envelope() {
+        let (_dir, mut model) = loaded(3, 10);
+
+        run(&mut model, Message::ToggleMark);
+        run(&mut model, Message::Next);
+        run(&mut model, Message::ToggleMark);
+
+        model.dialog = Some(Dialog::FlagAdd);
+        model.dialog_index = 1;
+        run(&mut model, Message::Run(Blocking::Flag { add: true }));
+
+        let flagged = model
+            .envelopes
+            .iter()
+            .filter(|envelope| {
+                envelope
+                    .flags
+                    .iter()
+                    .any(|f| f.raw().eq_ignore_ascii_case("\\Flagged"))
+            })
+            .count();
+        assert_eq!(flagged, 2);
+        assert!(model.marked.is_empty());
+    }
+
+    #[test]
+    fn esc_clears_the_marks_before_anything_else() {
+        let (_dir, mut model) = loaded(2, 10);
+        run(&mut model, Message::ToggleMark);
+
+        run(&mut model, Message::Esc);
+
+        assert!(model.marked.is_empty());
+        assert!(model.running);
+        assert_eq!(model.active_panel, Panel::Envelopes);
+    }
+
+    #[test]
+    fn another_mailbox_clears_the_marks() {
+        let (_dir, mut model) = loaded(2, 10);
+        run(&mut model, Message::ToggleMark);
+
+        model.active_panel = Panel::Mailboxes;
+        run(&mut model, Message::Enter);
+
+        assert!(model.marked.is_empty());
+    }
+
+    fn count(model: &mut Model, mailbox: &str) -> usize {
+        model
+            .client
+            .list_envelopes(mailbox, 1, 50)
+            .unwrap()
+            .envelopes
+            .len()
+    }
+
+    /// Opens the mailbox named `name` as the mailbox panel does.
+    fn open(model: &mut Model, name: &str) {
+        model.mailbox_index = model.mailboxes.iter().position(|m| m.name == name).unwrap();
+        model.active_panel = Panel::Mailboxes;
+        run(model, Message::Enter);
+        model.active_panel = Panel::Envelopes;
+    }
+
+    #[test]
+    fn a_delete_moves_to_the_trash_without_asking() {
+        let (_dir, mut model) = loaded(2, 10);
+
+        run(&mut model, Message::DeleteSelected);
+
+        assert_eq!(model.dialog, None);
+        assert_eq!(
+            model.status_message.as_deref(),
+            Some("Moved 1 message to the trash")
+        );
+        assert_eq!(model.envelopes.len(), 1);
+        assert_eq!(count(&mut model, "Trash"), 1);
+    }
+
+    #[test]
+    fn a_delete_in_the_trash_asks_then_removes_for_good() {
+        let (_dir, mut model) = loaded(2, 10);
+        run(&mut model, Message::ToggleMark);
+        run(&mut model, Message::ToggleMark);
+        run(&mut model, Message::DeleteSelected);
+        open(&mut model, "Trash");
+        assert_eq!(model.envelopes.len(), 2);
+
+        run(&mut model, Message::DeleteSelected);
+        assert_eq!(model.dialog, Some(Dialog::ConfirmDelete));
+
+        model.dialog_index = 0;
+        run(&mut model, Message::DialogConfirm);
+
+        assert_eq!(
+            model.status_message.as_deref(),
+            Some("Deleted 1 message for good")
+        );
+        assert_eq!(count(&mut model, "Trash"), 1);
+    }
+
+    #[test]
+    fn declining_a_delete_in_the_trash_leaves_everything() {
+        let (_dir, mut model) = loaded(1, 10);
+        run(&mut model, Message::DeleteSelected);
+        open(&mut model, "Trash");
+
+        run(&mut model, Message::DeleteSelected);
+        model.dialog_index = 1;
+        run(&mut model, Message::DialogConfirm);
+
+        assert_eq!(model.dialog, None);
+        assert_eq!(count(&mut model, "Trash"), 1);
+    }
+
+    #[test]
+    fn a_delete_without_a_trash_names_the_alias_to_set() {
+        let (_dir, mut model) = loaded_with(1, 10, false);
+
+        run(&mut model, Message::DeleteSelected);
+
+        let status = model.status_message.clone().unwrap();
+        assert!(status.contains("mailbox.alias.trash"), "{status}");
+        assert_eq!(model.envelopes.len(), 1);
     }
 }

@@ -183,9 +183,15 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
             } else {
                 model.theme.envelope_unread
             };
+            let marked = model.is_marked(&envelope.id);
+            let style = if marked {
+                style.patch(model.theme.envelope_marked)
+            } else {
+                style
+            };
 
             let cells = vec![
-                Cell::from(format_flags(envelope)),
+                Cell::from(format_flags(envelope, marked)),
                 Cell::from(envelope.subject.clone()),
                 Cell::from(truncate(&format_from(envelope), 20)),
                 Cell::from(truncate(&format_date(envelope), 6)),
@@ -201,14 +207,17 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
             model
                 .selected_mailbox_name()
                 .map(|m| {
-                    let total_pages = model.total_pages();
-                    if total_pages > 1 {
-                        format!(" - {m} (page {}/{total_pages})", model.envelope_page + 1)
-                    } else {
-                        format!(" - {}", m)
+                    let page = model.envelope_page + 1;
+                    match model.total_pages() {
+                        Some(pages) if pages > 1 => format!(" - {m} (page {page}/{pages})"),
+                        None if page > 1 || model.has_next_page() => {
+                            format!(" - {m} (page {page})")
+                        }
+                        _ => format!(" - {m}"),
                     }
                 })
                 .unwrap_or_default()
+                + &marked_count(model)
         ))
         .borders(Borders::ALL)
         .border_style(get_border_style(model, Panel::Envelopes));
@@ -250,8 +259,9 @@ pub fn envelope_capacity(height: u16) -> usize {
     height.saturating_sub(3) as usize
 }
 
-fn format_flags(envelope: &Envelope) -> String {
+fn format_flags(envelope: &Envelope, marked: bool) -> String {
     let mut s = String::new();
+    s.push(if marked { '+' } else { ' ' });
     s.push(
         if envelope.flags.contains(&Flag::from_iana(IanaFlag::Seen)) {
             ' '
@@ -440,7 +450,7 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
             frame,
             &theme,
             model.dialog_index,
-            " Actions ",
+            &format!(" Actions{} ", marked_count(model)),
             &EnvelopeAction::ALL.map(|a| a.label()),
         ),
         Some(Dialog::Compose) => render_dialog(
@@ -466,6 +476,17 @@ fn render_dialog_overlay(frame: &mut Frame, model: &Model) {
             " Remove Flag ",
             &FlagAction::ALL.map(|a| a.label()),
         ),
+        Some(Dialog::ConfirmDelete) => {
+            let count = model.action_ids().len();
+            let messages = if count == 1 { "message" } else { "messages" };
+            render_dialog(
+                frame,
+                &theme,
+                model.dialog_index,
+                &format!(" Delete {count} {messages} for good? "),
+                &["Delete for good", "Cancel"],
+            );
+        }
         None => {}
     }
 }
@@ -598,4 +619,12 @@ fn centered_rect_fixed_height(percent_x: u16, height: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(vertical[1])[1]
+}
+
+/// ` (n marked)` while envelopes are marked, empty otherwise.
+fn marked_count(model: &Model) -> String {
+    match model.marked.len() {
+        0 => String::new(),
+        n => format!(" ({n} marked)"),
+    }
 }

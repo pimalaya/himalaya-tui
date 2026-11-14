@@ -14,13 +14,13 @@ use serde::{Deserialize, Serialize};
 use tui_input::Input;
 
 use crate::{
+    client::MailClient,
     contact::{Contact, ContactCompleteKey, ContactLookup, ContactTarget},
     email::{
         envelope::Envelope,
         flag::{Flag, IanaFlag},
         mailbox::Mailbox,
     },
-    shared::client::EmailClient,
     tui::theme::Theme,
 };
 
@@ -70,8 +70,17 @@ pub struct Model {
     /// Zero before the first render. The page size follows it, so a page
     /// is exactly what fits on screen and no page is half read.
     pub envelope_capacity: usize,
-    /// Envelopes the backend reports for the selected mailbox.
-    pub envelope_total: u32,
+    /// Messages the selected mailbox holds, as himalaya's listing
+    /// reported it, `None` when its backend does not say.
+    pub envelope_total: Option<u64>,
+    /// Whether the last listing named a next page.
+    pub envelope_has_next: bool,
+    /// The first page known to come back empty, which a full last page
+    /// leads to when no total says where the mailbox ends.
+    pub envelope_end: Option<usize>,
+    /// Ids of the envelopes marked for an action, in marking order. They
+    /// belong to the selected mailbox and survive paging.
+    pub marked: Vec<String>,
     /// Identifier of the mailbox the envelopes were loaded from.
     pub selected_mailbox: Option<String>,
     /// Name of the account the TUI runs on.
@@ -118,9 +127,9 @@ pub struct Model {
     pub contact_completion: Option<ContactCompletion>,
     /// Resolved colors every render function reads.
     pub theme: Theme,
-    /// Backend client every network action goes through.
-    pub client: EmailClient,
-    /// Timestamp of the last successful network round-trip.
+    /// The himalaya session every mail action goes through.
+    pub client: MailClient,
+    /// Timestamp of the last round-trip, or of the last keepalive.
     ///
     /// The app loop dispatches [`Message::Ping`] once the elapsed time
     /// crosses [`PING_INTERVAL`].
@@ -131,6 +140,32 @@ impl Model {
     /// Envelope the cursor is on, if the page has one.
     pub fn selected_envelope(&self) -> Option<&Envelope> {
         self.envelopes.get(self.envelope_index)
+    }
+
+    /// The ids an action reaches: the marked envelopes when any are,
+    /// else the one the cursor is on.
+    pub fn action_ids(&self) -> Vec<String> {
+        if !self.marked.is_empty() {
+            return self.marked.clone();
+        }
+
+        self.selected_envelope()
+            .map(|envelope| vec![envelope.id.clone()])
+            .unwrap_or_default()
+    }
+
+    /// Whether `id` is marked.
+    pub fn is_marked(&self, id: &str) -> bool {
+        self.marked.iter().any(|marked| marked == id)
+    }
+
+    /// Role of the mailbox the envelopes were loaded from, if any.
+    pub fn selected_mailbox_role(&self) -> Option<&str> {
+        let id = self.selected_mailbox.as_deref()?;
+        self.mailboxes
+            .iter()
+            .find(|m| m.id == id)
+            .and_then(|m| m.role.as_deref())
     }
 
     /// Display name of the mailbox the envelopes were loaded from.
@@ -165,17 +200,26 @@ impl Model {
             Some(Dialog::Compose) => ComposeAction::ALL.len(),
             Some(Dialog::CopyTo) | Some(Dialog::MoveTo) => self.filtered_mailboxes().len(),
             Some(Dialog::FlagAdd) | Some(Dialog::FlagRemove) => FlagAction::ALL.len(),
+            Some(Dialog::ConfirmDelete) => 2,
             None => 0,
         }
     }
 
-    /// Number of pages the selected mailbox spans, at least one.
-    pub fn total_pages(&self) -> usize {
-        if self.envelope_page_size == 0 || self.envelope_total == 0 {
-            1
-        } else {
-            (self.envelope_total as usize).div_ceil(self.envelope_page_size)
-        }
+    /// Number of pages the selected mailbox spans, at least one, `None`
+    /// when its backend reports no total.
+    pub fn total_pages(&self) -> Option<usize> {
+        total_pages(self.envelope_total, self.envelope_page_size)
+    }
+
+    /// Whether a page follows the loaded one: by the total when known,
+    /// else by the listing's next page, short of a page known empty.
+    pub fn has_next_page(&self) -> bool {
+        has_next_page(
+            self.total_pages(),
+            self.envelope_page,
+            self.envelope_has_next,
+            self.envelope_end,
+        )
     }
 
     /// Composer buffer as a string.
@@ -242,6 +286,8 @@ pub enum Dialog {
     FlagAdd,
     /// Flag picker for a removal.
     FlagRemove,
+    /// Confirmation of a delete from the trash, which is for good.
+    ConfirmDelete,
 }
 
 /// Action offered by the envelope dialog.
@@ -263,11 +309,13 @@ pub enum EnvelopeAction {
     AddFlag,
     /// Remove a flag from the message.
     RemoveFlag,
+    /// Delete the message, trash first.
+    Delete,
 }
 
 impl EnvelopeAction {
     /// Every envelope action, in dialog order.
-    pub const ALL: [EnvelopeAction; 8] = [
+    pub const ALL: [EnvelopeAction; 9] = [
         EnvelopeAction::Read,
         EnvelopeAction::Reply,
         EnvelopeAction::ReplyAll,
@@ -276,6 +324,7 @@ impl EnvelopeAction {
         EnvelopeAction::Move,
         EnvelopeAction::AddFlag,
         EnvelopeAction::RemoveFlag,
+        EnvelopeAction::Delete,
     ];
 
     /// Label shown in the dialog.
@@ -289,6 +338,7 @@ impl EnvelopeAction {
             EnvelopeAction::Move => "Move",
             EnvelopeAction::AddFlag => "Add flag",
             EnvelopeAction::RemoveFlag => "Remove flag",
+            EnvelopeAction::Delete => "Delete",
         }
     }
 }
@@ -356,6 +406,15 @@ impl FlagAction {
             FlagAction::Seen => Flag::from_iana(IanaFlag::Seen),
             FlagAction::Flagged => Flag::from_iana(IanaFlag::Flagged),
             FlagAction::Answered => Flag::from_iana(IanaFlag::Answered),
+        }
+    }
+
+    /// The flag's name as himalaya's `flag add` takes it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            FlagAction::Seen => "seen",
+            FlagAction::Flagged => "flagged",
+            FlagAction::Answered => "answered",
         }
     }
 }
@@ -427,6 +486,8 @@ pub enum Message {
     Initialize,
     /// Move the focus to the next panel.
     TogglePanel,
+    /// Toggle the mark of the focused envelope, then move down.
+    ToggleMark,
     /// Move the selection one step down.
     Next,
     /// Move the selection one step up.
@@ -467,7 +528,7 @@ pub enum Message {
     DialogConfirm,
     /// Close the dialog without acting.
     DialogClose,
-    /// Keep the backend connection warm after an idle period.
+    /// Keep the connection alive after an idle period.
     Ping,
     /// Fetch the mailboxes of the account.
     LoadMailboxes,
@@ -485,6 +546,9 @@ pub enum Message {
     MoveSelectedToTarget,
     /// Add or remove the picked flag on the selected message.
     FlagSelected { add: bool },
+    /// Delete the marked or the selected messages, asking first in the
+    /// trash.
+    DeleteSelected,
     /// Send the compose buffer.
     SendCompose,
     /// Compile the compose buffer and show the result.
@@ -518,8 +582,105 @@ pub enum Blocking {
     Move,
     /// Add or remove the picked flag on the selected message.
     Flag { add: bool },
+    /// Delete the marked or the selected messages.
+    Delete,
     /// Compile and send the compose buffer.
     Send,
     /// Save the compose buffer to the drafts mailbox.
     SaveDraft,
+}
+
+/// Number of pages `total` messages span at `page_size` a page, at least
+/// one, `None` without a total.
+fn total_pages(total: Option<u64>, page_size: usize) -> Option<usize> {
+    let total = usize::try_from(total?).ok()?;
+
+    if page_size == 0 || total == 0 {
+        Some(1)
+    } else {
+        Some(total.div_ceil(page_size))
+    }
+}
+
+/// Whether a page follows the zero-based `page`: by the page count when
+/// known, else by the listing's next page, short of the page `end` known
+/// to come back empty.
+fn has_next_page(pages: Option<usize>, page: usize, has_next: bool, end: Option<usize>) -> bool {
+    match pages {
+        Some(pages) => page + 1 < pages,
+        None => has_next && end != Some(page + 1),
+    }
+}
+
+#[cfg(test)]
+impl Model {
+    /// A model over `client`, nothing loaded, pages of `page_size`.
+    pub fn for_tests(client: MailClient, page_size: usize) -> Self {
+        Self {
+            running: true,
+            active_panel: Panel::Mailboxes,
+            mailboxes: Vec::new(),
+            mailbox_index: 0,
+            mailbox_offset: 0,
+            mailbox_filter: Input::default(),
+            envelopes: Vec::new(),
+            envelope_index: 0,
+            envelope_offset: 0,
+            envelope_page: 0,
+            envelope_page_size: page_size,
+            envelope_capacity: 0,
+            envelope_total: None,
+            envelope_has_next: false,
+            envelope_end: None,
+            marked: Vec::new(),
+            selected_mailbox: None,
+            account_name: String::from("test"),
+            from: None,
+            from_name: None,
+            signature: String::new(),
+            status_message: None,
+            deferred: None,
+            bottom_panel: BottomPanel::None,
+            message_content: None,
+            message_scroll: 0,
+            editor_state: EditorState::new(edtui::Lines::from("")),
+            editor_handler: Keybinds::Vim.editor_handler(),
+            dialog: None,
+            dialog_index: 0,
+            keybinds: None,
+            contact_command: None,
+            contact_complete_key: ContactCompleteKey::default(),
+            contact_lookup: None,
+            contact_completion: None,
+            theme: Theme::default(),
+            client,
+            last_activity: Instant::now(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_next_page, total_pages};
+
+    #[test]
+    fn a_total_decides_the_page_count() {
+        assert_eq!(total_pages(Some(120), 25), Some(5));
+        assert_eq!(total_pages(Some(25), 25), Some(1));
+        assert_eq!(total_pages(Some(0), 25), Some(1));
+        assert_eq!(total_pages(None, 25), None);
+
+        assert!(has_next_page(Some(5), 3, false, None));
+        assert!(!has_next_page(Some(5), 4, true, None));
+    }
+
+    /// Without a total, a full last page names a next one that comes back
+    /// empty: once seen empty, it is no longer offered.
+    #[test]
+    fn without_a_total_the_page_known_empty_ends_the_mailbox() {
+        assert!(has_next_page(None, 1, true, None));
+        assert!(!has_next_page(None, 1, true, Some(2)));
+        assert!(!has_next_page(None, 1, false, None));
+        assert!(has_next_page(None, 0, true, Some(2)));
+    }
 }

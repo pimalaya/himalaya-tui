@@ -10,60 +10,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added the three-pane terminal interface: mailboxes, envelopes, and the message body or the composer.
 
-  The envelope list is paged one screenful at a time, and the page count comes from the total the backend reports: `EXISTS` on IMAP, the query `total` on JMAP, the entry count on Maildir.
+  The envelope list is paged one screenful at a time, and the page count comes from the `total` himalaya's `envelope list` reports. A backend reporting none (Gmail, Microsoft Graph) shows `(page n)` and pages on while himalaya names a next page.
 
   The panel names its page `(page n/p)` when there is more than one, a resized terminal re-cuts the page around the selected envelope, and moving past either end loads the next or the previous one.
 
-- Added the IMAP, JMAP, SMTP and Maildir backends, each behind its own cargo feature.
+- Added every backend of the [himalaya](https://github.com/pimalaya/himalaya) CLI (IMAP, SMTP, JMAP, Gmail API, Microsoft Graph, Maildir, mbox, pimdir), each behind the cargo feature of the same name.
 
-  Every `server` field takes a full `scheme://` URL or a bare authority carrying an optional port, and rejects a scheme the protocol does not speak. A `unix://` server is a pre-authenticated socket proxy such as sirup, over which no SASL is negotiated.
+  The TUI links himalaya as a library, pinned by git revision, and runs himalaya's own commands in-process over one session kept for the whole run, as himalaya's REPL does: the client connects on the first command, is kept, and is built again after a command fails, the terminal handed back meanwhile so a credential command can prompt. Every option, credential and behaviour of an account is himalaya's.
 
-  The SMTP transport connects on the first send rather than at startup, and Maildir flags carry the custom keywords named by the `dovecot-keywords` sidecar or by the keywords header.
+- Added the configuration file shared with the himalaya CLI: the account, its backends, its identity and its signature are resolved through himalaya's own configuration, so one file reads the same in both binaries. The TUI adds `keybinds`, `contact-command`, `contact-complete-key` and `[theme]`, which himalaya ignores.
 
-  Path fields are shell-expanded as the file is read, so `maildir.root = "~/Mail"` and `imap.tls.cert = "$CERTS/ca.pem"` name what they would in a shell rather than a literal directory called `~` under the working directory.
+  With no configuration, the TUI stops before drawing anything, naming the path it looked at and the sample to start from.
 
-- Added the anonymous, login, plain, oauthbearer, xoauth2 and scram-sha-256 SASL mechanisms, plus basic and bearer HTTP authentication for JMAP.
-
-  A credential command named by more than one block of an account is spawned once per resolution rather than once per block, so a `pass` or `gpg` entry backing both IMAP and SMTP unlocks once where the wizard used to ask for it twice.
-- Added the setup wizard, run when the configuration resolves no account.
-
-  It is the himalaya CLI's wizard prompt for prompt: one prompt for an email address, a parallel search of the services reachable from it, a pick list of those that answered, the authentication that service advertised, and a connection test before the account is accepted.
-
-  On the way out it offers to write the `[accounts.<name>]` block to the configuration file, or to append it to the one already there.
-
-  Two things differ from the CLI. `--no-config` forces the wizard on a run whose file resolves an account, and declining the offer prints nothing where the CLI prints the document to stdout: the account is opened either way, for the session alone when nothing was written.
-
-- Added account discovery through known provider rules, PACC, Thunderbird Autoconfiguration, RFC 6186 SRV and the RFC 8620 JMAP session resolve, searched in parallel.
-
-  DNS goes through the host's own resolver, overridable with `HIMALAYA_DNS_RESOLVER` and falling back to Cloudflare's `1.1.1.1` over TCP.
-
-- Added the configuration file shared with the [himalaya](https://github.com/pimalaya/himalaya) CLI: the same `[accounts.<name>]` blocks load on both binaries.
-
-  The account identity reads under either spelling, `from` and `from-name` or `email` and `display-name`, and is written under the CLI's. TUI-only fields and CLI-only sections coexist without errors.
-
-- Added `signature` and `signature-delim`, at the global and the account level.
-
-  `signature` is the signature alone and `signature-delim` decides the separator introducing it, defaulting to the RFC 3676 section 4.3 `"-- \n"` and written verbatim. The block is assembled as the himalaya CLI assembles it, so one value reads the same under both binaries.
+- Added `signature` and `signature-delim` support, read through himalaya: `signature` is the signature alone and `signature-delim` the separator introducing it, defaulting to the RFC 3676 section 4.3 `"-- \n"` and written verbatim.
 
 - Added the in-app composer, with an `Alt-e` handoff to the system editor. Drafts are written in [MML](https://github.com/pimalaya/mml).
+
+  Sending goes through himalaya's `message send`, which saves a copy where `message.send.save-copy` says. A draft is saved to the account's drafts mailbox, its `mailbox.alias.drafts` else the one the backend marks as such. A write a sync engine applies later (pimdir) says it is queued.
+
 - Added recipient completion from a `contact-command`, the aerc way, triggered by `contact-complete-key` (`tab` by default) in the `To`, `Cc`, `Bcc` and `Reply-To` headers ([#16]).
 
   The command runs off the event loop and is killed after 5 seconds. One match is inserted directly, several open a list at the cursor.
 - Added the `default`, `dracula-dark`, `one-light` and `tokyo-night` color presets, plus per-field `[theme.*]` overrides.
-- Added the `-a/--account`, `-c/--config`, `--no-config`, `--from` and `--from-name` flags, the `[EMAIL]` positional argument answering the wizard's first prompt, and the `completion` and `manual` subcommands.
+- Added the `-c/--config` (repeated to merge files), `-a/--account`, `-b/--backend`, `--from`, `--from-name` and `--keybinds` flags, and the `completion` and `manual` subcommands.
 
-  `-a` addresses the configuration and errors on an unknown name, listing the accounts the file does hold, while the positional argument skips the lookup entirely. The two are mutually exclusive.
+  `-a` errors on an unknown name, listing the accounts the file does hold. `--help` closes on the shared Pimalaya footer.
 
-  `--help` closes on the shared Pimalaya footer.
-
-- Added mailbox name resolution to the backend-native id before dispatch, so the composer's `Drafts` target lands on a JMAP account too.
-- Added a 60-second idle ping against the active storage backend, so a long reading session does not lose its connection to a server-side inactivity timeout.
+- Added marks: `Space` marks the envelope under the cursor and moves down, across pages ([#9]). Copy, move, the flag actions and delete reach every marked envelope in one himalaya command, or the selected one when none is marked; the envelopes a command could not reach stay marked, and the status bar says `Moved 2 of 3 messages` and the first failure. `Esc` clears the marks, and so does selecting another mailbox. Marked rows take the new `[theme.envelope-marked]` style.
+- Added delete, from the envelope dialog or the `Delete` key ([#7]): himalaya's `message delete` moves the messages to the trash (`mailbox.alias.trash`, else the backend's trash role), and removes them for good when they already are there, after a confirmation. On an IMAP server without UIDPLUS they are flagged deleted, an expunge still owing.
+- Added a keepalive after 60 idle seconds, a `NOOP` on IMAP, so a long reading session does not lose its connection to a server-side inactivity timeout.
 
 ### Changed
 
 - Bumped ctutils to 0.4.6, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382, RUSTSEC-2026-0383 and RUSTSEC-2026-0385.
 - Changed piped `--json` output to print one value per line (pimalaya-cli `55b6693`).
-- Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for message bodies, Maildir envelopes, the SMTP envelope and the IMAP `Message-ID` fallback.
+- Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for the message bodies the TUI renders.
 
   An HTML-only body is now rendered by html2text, undecorated: headings, lists and paragraphs keep their layout and long lines wrap at 80 columns, where they used to run together.
 
@@ -74,5 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed nested Maildir mailboxes sharing a last segment, such as `Archive` and `[Gmail]/Archive`, showing as identical rows: a Maildir is now named by its path relative to the root, as the CLI does ([#22]).
 - Fixed message bodies and Maildir subjects in multi-byte charsets such as Shift_JIS, Big5, GBK or EUC-KR reading as replacement characters: they are now decoded. Reply and forward quotes still go through mml's parser and keep the old behaviour.
 
+[#7]: https://github.com/pimalaya/himalaya-tui/issues/7
+[#9]: https://github.com/pimalaya/himalaya-tui/issues/9
 [#16]: https://github.com/pimalaya/himalaya-tui/issues/16
 [#22]: https://github.com/pimalaya/himalaya-tui/issues/22

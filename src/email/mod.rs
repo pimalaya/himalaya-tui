@@ -1,11 +1,8 @@
 //! # Email vocabulary
 //!
-//! The shared cross-protocol email types the interface renders, inlined
-//! from the retired io-email crate.
-//!
-//! Strict least-common-denominator: the per-backend adapters producing
-//! these shapes live in each protocol module's backend submodule and keep
-//! their own vocabulary behind it.
+//! The mail types the interface renders, decoded from the `--json`
+//! output of himalaya's commands (`himalaya json-schema`): the coupling
+//! is that versioned contract, never himalaya's own Rust types.
 
 pub mod address;
 pub mod envelope;

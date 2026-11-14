@@ -43,6 +43,9 @@ pub struct Theme {
     pub envelope_seen: Style,
     /// Envelope row still unread.
     pub envelope_unread: Style,
+    /// Envelope row marked for an action, patched over its seen or
+    /// unread style.
+    pub envelope_marked: Style,
     /// Body of the message being read.
     pub message_body: Style,
     /// Text of the compose buffer.
@@ -106,6 +109,10 @@ impl Theme {
 
         if let Some(s) = &config.envelope_unread {
             t.envelope_unread = t.envelope_unread.patch(Style::from(s));
+        }
+
+        if let Some(s) = &config.envelope_marked {
+            t.envelope_marked = t.envelope_marked.patch(Style::from(s));
         }
 
         if let Some(s) = &config.message_body {

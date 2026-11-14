@@ -1,25 +1,19 @@
 //! # Mailbox
 //!
-//! The mailbox shape shared across all protocols.
+//! A mailbox, as `mailbox list` prints one.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// A mailbox (a.k.a. folder).
-///
-/// Strict least-common-denominator: protocol-specific data (IMAP
-/// delimiter and SPECIAL-USE attributes, JMAP role and rights, Maildir
-/// path, …) is intentionally absent.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Mailbox {
-    /// Backend-specific identifier: a JMAP id, the name elsewhere.
+    /// Backend-specific identifier, the value `-m` takes back.
     pub id: String,
     /// Human-readable mailbox name.
     pub name: String,
-    /// Total number of messages; `None` when not asked or not cheap.
+    /// The role the backend or `mailbox.alias.<role>` gives it (`inbox`,
+    /// `sent`, `drafts`, `trash`...), `None` for an ordinary one.
     #[serde(default)]
-    pub total: Option<u64>,
-    /// Number of unread messages; `None` when not asked or not cheap.
-    #[serde(default)]
-    pub unread: Option<u64>,
+    pub role: Option<String>,
 }
