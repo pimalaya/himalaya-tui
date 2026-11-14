@@ -819,15 +819,6 @@ dependencies = [
 
 [[package]]
 name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
@@ -1307,7 +1298,6 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "himalaya"
 version = "2.2.1"
-source = "git+https://github.com/pimalaya/himalaya?rev=d70fb8d11cf9d7d66b1cda8f2e8bb5270acd0da2#d70fb8d11cf9d7d66b1cda8f2e8bb5270acd0da2"
 dependencies = [
  "anyhow",
  "ariadne",
@@ -1315,7 +1305,7 @@ dependencies = [
  "chrono",
  "chumsky",
  "clap",
- "dirs 7.0.0",
+ "dirs",
  "gethostname",
  "humansize",
  "idna_adapter",
@@ -2095,7 +2085,6 @@ checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
 [[package]]
 name = "mime-meta-language"
 version = "1.1.1"
-source = "git+https://github.com/pimalaya/mml#6055ed9ae2ef1087f0e596fba6aaf391add139b5"
 dependencies = [
  "chumsky",
  "log",
@@ -2727,7 +2716,6 @@ dependencies = [
 [[package]]
 name = "pimalaya-cli"
 version = "0.4.0"
-source = "git+https://github.com/pimalaya/cli?rev=0be1b1f08d19ccb9d16ee8e1d4266c27c96e0cdd#0be1b1f08d19ccb9d16ee8e1d4266c27c96e0cdd"
 dependencies = [
  "anyhow",
  "base64-codec",
@@ -2736,7 +2724,7 @@ dependencies = [
  "clap_mangen",
  "crossterm 0.29.0",
  "ctrlc",
- "dirs 7.0.0",
+ "dirs",
  "env_logger",
  "inquire",
  "log",
@@ -2757,7 +2745,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10789cb95e1f226e0f85b2f52eed57c75a88fac1008f371e383f4aa05d2311ba"
 dependencies = [
  "anyhow",
- "dirs 7.0.0",
+ "dirs",
  "log",
  "secrecy",
  "serde",
@@ -3481,9 +3469,6 @@ name = "shellexpand"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32824fab5e16e6c4d86dc1ba84489390419a39f97699852b66480bb87d297ed8"
-dependencies = [
- "dirs 6.0.0",
-]
 
 [[package]]
 name = "shlex"

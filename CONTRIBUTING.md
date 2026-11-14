@@ -33,7 +33,7 @@ cargo build --no-default-features --features maildir,rustls-ring
 
 ## Dependencies
 
-Every dependency resolves from crates.io except mime-meta-language, which the `[patch.crates-io]` table pins to its git repository until a release carries the composer's API; the pin comes out then. To build against a local checkout of a Pimalaya crate, add a `<crate>.path = "../<repo>"` entry there. If cargo reports two versions of a crate, patch every Pimalaya crate that pulls it transitively so the graph converges on the local copies.
+The `[patch.crates-io]` table points himalaya, pimalaya-cli and mime-meta-language at local checkouts (../himalaya, ../cli and ../mml), so clone those repositories beside this one to build, and pins a few other Pimalaya crates to git revisions; the entries come out as releases carry what the TUI needs. To build against a local checkout of a Pimalaya crate, add a `<crate>.path = "../<repo>"` entry there. If cargo reports two versions of a crate, patch every Pimalaya crate that pulls it transitively so the graph converges on the local copies.
 
 ## Contributing a theme preset
 
