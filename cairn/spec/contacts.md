@@ -9,11 +9,11 @@ The TUI holds no address book. Recipients complete from a command the user confi
 
 ### Requirement: Recipients complete from a contact command
 
-The TUI SHALL hold no address book of its own. `contact-command`, global or per account with the account winning, is run with the typed fragment and its stdout read as one contact per line, the address then an optional tab and name. A `%s` is replaced by the fragment, shell-quoted in a shell line; with no `%s`, the fragment is appended as a last argument.
+The TUI SHALL hold no address book of its own. `contact-command`, under `[tui]` or `[accounts.<name>.tui]` with the account winning, is run with the typed fragment and its stdout read as one contact per line, the address then an optional tab and name. A `%s` is replaced by the fragment, shell-quoted in a shell line; with no `%s`, the fragment is appended as a last argument.
 
 #### Scenario: A shell line with a placeholder
 
-Given `contact-command = "khard email --parsable %s"` and the fragment `o'brien`, when completion runs, then the shell receives `khard email --parsable 'o'\''brien'`.
+Given `tui.contact-command = "khard email --parsable %s"` and the fragment `o'brien`, when completion runs, then the shell receives `khard email --parsable 'o'\''brien'`.
 
 #### Scenario: No command configured
 

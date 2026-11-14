@@ -16,8 +16,11 @@
 #   https://github.com/pimalaya/himalaya/blob/master/config.sample.toml
 #
 # This file documents what the TUI adds on top: the composer's keybindings, the
-# contact command and the theme. Himalaya ignores those keys, so one file backs
-# both binaries.
+# contact command and the theme. They live under a `[tui]` table, at the top
+# level and in an account (`[accounts.<name>.tui]`), which himalaya leaves to
+# the TUI, so one file backs both binaries. Written outside those tables, they
+# are not read by the TUI and himalaya refuses the file, as any key it does not
+# know.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -30,6 +33,12 @@
 #display-name = "Example"
 #signature = "Regards,\nExample"
 #signature-delim = "-- \n"
+
+# --------------------------------------------------------------------------------
+# TUI config
+# --------------------------------------------------------------------------------
+
+#[tui]
 
 # Composer keybinding flavor: `vim` (default) or `emacs`, overridden by the
 # `--keybinds` flag. It drives edtui's own bindings and the event loop's
@@ -65,84 +74,84 @@
 #   bold, dim, italic, underlined, slow-blink, rapid-blink, reversed, hidden,
 #   crossed-out
 
-#[theme]
+#[tui.theme]
 
 # Preset theme: `default` (named ANSI), `dracula-dark`, `one-light` or
 # `tokyo-night`. Omit to start from the built-in default; overrides below are
 # layered on top.
 #preset = "dracula-dark"
 
-# Each `[theme.*]` table overrides one UI element. Any field left out keeps
+# Each `[tui.theme.*]` table overrides one UI element. Any field left out keeps
 # the value from the preset (or the built-in default). Examples below cover
 # every themable element with its built-in default value.
 
 # Top header bar (account name).
-#[theme.header]
+#[tui.theme.header]
 #bg = "blue"
 #fg = "white"
 #mod = ["bold"]
 
 # Bottom status bar.
-#[theme.status-bar]
+#[tui.theme.status-bar]
 #bg = "dark-gray"
 #fg = "white"
 
 # Border of the currently-focused panel.
-#[theme.border-active]
+#[tui.theme.border-active]
 #fg = "cyan"
 
 # Border of inactive panels.
-#[theme.border-inactive]
+#[tui.theme.border-inactive]
 #fg = "gray"
 
 # Border of modal dialogs (Actions, Copy/Move To, Add/Remove Flag, …).
-#[theme.dialog-border]
+#[tui.theme.dialog-border]
 #fg = "yellow"
 
 # Selected row / dialog item ("cursor").
-#[theme.cursor]
+#[tui.theme.cursor]
 #bg = "cyan"
 #fg = "white"
 #mod = ["bold"]
 
 # Marker on the currently-open mailbox in the mailbox list.
-#[theme.mailbox-current]
+#[tui.theme.mailbox-current]
 #fg = "yellow"
 #mod = ["bold"]
 
 # Envelope table column header row.
-#[theme.envelope-header]
+#[tui.theme.envelope-header]
 #fg = "yellow"
 #mod = ["bold"]
 
 # Envelopes flagged as Seen (read messages).
-#[theme.envelope-seen]
+#[tui.theme.envelope-seen]
 #fg = "gray"
 
 # Envelopes without the Seen flag (unread messages).
-#[theme.envelope-unread]
+#[tui.theme.envelope-unread]
 #mod = ["bold"]
 
 # Envelope row marked for an action, patched over its seen or unread style.
-#[theme.envelope-marked]
+#[tui.theme.envelope-marked]
 #fg = "magenta"
 #mod = ["bold"]
 
 # Message reader body text.
-#[theme.message-body]
+#[tui.theme.message-body]
 #fg = "white"
 
 # Composer body text.
-#[theme.compose-text]
+#[tui.theme.compose-text]
 #fg = "white"
 
 # Composer cursor cell.
-#[theme.compose-cursor]
+#[tui.theme.compose-cursor]
 #bg = "white"
 #fg = "black"
 
 # Composer visual-mode selection.
-#[theme.compose-selection]
+#[tui.theme.compose-selection]
 #bg = "cyan"
 #fg = "black"
 
@@ -162,7 +171,7 @@ default = true
 
 # Per-account overrides of the global options above.
 #signature = "Best,\nExample User"
-#contact-command = ["abook", "--mutt-query", "%s"]
+#tui.contact-command = ["abook", "--mutt-query", "%s"]
 
 # The backend blocks (`imap`, `smtp`, `jmap`, `gmail`, `msgraph`, `maildir`,
 # `mbox`, `pimdir`) are himalaya's: see its sample for every option.

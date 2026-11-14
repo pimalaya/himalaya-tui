@@ -22,8 +22,8 @@
 //!
 //! The configuration is himalaya's: the account, its backends, its
 //! identity and its signature are resolved through himalaya's own types.
-//! The TUI adds a few keys beside them ([`config`]): the composer's
-//! keybindings, the contact command and the theme.
+//! The TUI adds a few keys under its own `tui` tables ([`config`]): the
+//! composer's keybindings, the contact command and the theme.
 //!
 //! ## Terminal interface
 //!

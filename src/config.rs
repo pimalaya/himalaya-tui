@@ -1,13 +1,16 @@
 //! # Configuration
 //!
-//! The keys the TUI adds to himalaya's configuration file: the composer's
+//! The keys the TUI adds to himalaya's configuration file, under a `tui`
+//! table at the top level and in each account: the composer's
 //! keybindings, the contact command and the theme. Everything else about
 //! an account (its backends, identity, signature, mailboxes) is
 //! himalaya's, read through himalaya's own types, so the TUI models no
 //! backend block and one file reads the same in both binaries.
 //!
 //! `Config::project_name()` answers "himalaya", so the default paths are
-//! the CLI's, and unknown keys are ignored: they are himalaya's.
+//! the CLI's. Keys outside the `tui` tables are ignored, being himalaya's,
+//! and the `tui` tables refuse a key they do not know, as himalaya refuses
+//! one outside them.
 
 use std::collections::HashMap;
 
@@ -27,18 +30,27 @@ use crate::{
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
+    /// The TUI's own top-level keys.
+    #[serde(default)]
+    pub tui: TuiConfig,
+    #[serde(default)]
+    pub accounts: HashMap<String, AccountConfig>,
+}
+
+/// The top-level `[tui]` table.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TuiConfig {
     /// Composer keybinding flavor, Vim when omitted and overridden by
     /// the `--keybinds` flag.
     pub keybinds: Option<Keybinds>,
-    /// Fallback for [`AccountConfig::contact_command`].
+    /// Fallback for [`AccountTuiConfig::contact_command`].
     pub contact_command: Option<CommandConfig>,
     /// Key completing a recipient in the composer, `tab` when omitted.
     pub contact_complete_key: Option<ContactCompleteKey>,
     /// Color theme, resolved into a [`Theme`] at startup.
     #[serde(default)]
     pub theme: ThemeConfig,
-    #[serde(default)]
-    pub accounts: HashMap<String, AccountConfig>,
 }
 
 impl TomlConfig for Config {
@@ -72,6 +84,15 @@ pub struct AccountConfig {
     /// Whether this account opens when `-a` names none.
     #[serde(default)]
     pub default: bool,
+    /// The TUI's own keys of this account.
+    #[serde(default)]
+    pub tui: AccountTuiConfig,
+}
+
+/// One `[accounts.<name>.tui]` table.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct AccountTuiConfig {
     /// Command answering the contacts matching a recipient fragment,
     /// winning over the global one.
     pub contact_command: Option<CommandConfig>,
@@ -132,7 +153,7 @@ impl PresetConfig {
 /// [`ModifierConfig`] variants.
 ///
 /// ```toml
-/// [theme.cursor]
+/// [tui.theme.cursor]
 /// fg = "magenta"
 /// bg = "#222"
 /// mod = ["bold", "italic"]
@@ -201,41 +222,152 @@ impl From<ModifierConfig> for Modifier {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use std::{fs, path::PathBuf};
 
-    /// The TUI's keys and himalaya's share one document, each reader
-    /// ignoring what the other owns.
+    use himalaya::cli::resolve_account;
+    use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
+    use ratatui::style::Color;
+    use tempfile::TempDir;
+
+    use crate::{
+        config::Config,
+        contact::ContactCompleteKey,
+        tui::{
+            model::Keybinds,
+            theme::{self, Theme},
+        },
+    };
+
+    /// Writes `toml` to a configuration file of a fresh directory.
+    fn write(toml: &str) -> (TempDir, Vec<PathBuf>) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, toml).unwrap();
+        (dir, vec![path])
+    }
+
+    /// The TUI reads its keys from the `tui` tables, and himalaya loads
+    /// the same file, leaving them to the TUI.
     #[test]
-    fn the_tui_keys_read_beside_himalaya_ones() {
-        let toml = r#"
+    fn the_tui_tables_read_beside_himalaya_keys() {
+        let (_dir, paths) = write(
+            r#"
+            envelope.list.page-size = 50
+
+            [tui]
             keybinds = "emacs"
             contact-command = "khard email --parsable %s"
-            envelope.list.page-size = 50
+            contact-complete-key = "ctrl-space"
+
+            [tui.theme]
+            preset = "tokyo-night"
+
+            [tui.theme.cursor]
+            fg = "magenta"
+
+            [accounts.work]
+            default = true
+            email = "alice@example.org"
+            maildir.root = "~/Mail"
+
+            [accounts.work.tui]
+            contact-command = ["abook", "--mutt-query", "%s"]
+            "#,
+        );
+
+        let mut config = Config::load(&paths).unwrap();
+        let account = config.accounts.remove("work").unwrap();
+        let theme = Theme::resolve(&config.tui.theme);
+        let key: ContactCompleteKey = "ctrl-space".parse().unwrap();
+        let khard = CommandConfig::Shell("khard email --parsable %s".into());
+        let abook = CommandConfig::Argv {
+            program: "abook".into(),
+            args: vec!["--mutt-query".into(), "%s".into()],
+        };
+
+        assert_eq!(config.tui.keybinds, Some(Keybinds::Emacs));
+        assert_eq!(config.tui.contact_command, Some(khard));
+        assert_eq!(config.tui.contact_complete_key, Some(key));
+        assert_eq!(theme.header, theme::tokyo_night::THEME.header);
+        assert_eq!(theme.cursor.fg, Some(Color::Magenta));
+        assert!(account.default);
+        assert_eq!(account.tui.contact_command, Some(abook));
+
+        let (_, name, account) = resolve_account(&paths, None).unwrap();
+        assert_eq!(name, "work");
+        assert_eq!(account.email.as_deref(), Some("alice@example.org"));
+    }
+
+    /// A key the `tui` tables do not know fails the load, naming it.
+    #[test]
+    fn an_unknown_tui_key_is_refused() {
+        let tables = [
+            "[tui]\nkeybind = \"emacs\"\n",
+            "[tui.theme]\npreset = \"default\"\nheadr.fg = \"blue\"\n",
+            "[accounts.work.tui]\ncontact-cmd = \"khard\"\n",
+        ];
+
+        for (toml, key) in tables.into_iter().zip(["keybind", "headr", "contact-cmd"]) {
+            let (_dir, paths) = write(toml);
+            let err = format!("{:#}", Config::load(&paths).unwrap_err());
+            assert!(err.contains(&format!("unknown field `{key}`")), "{err}");
+        }
+    }
+
+    /// The TUI keys written outside the `tui` tables are not read, and
+    /// himalaya refuses them.
+    #[test]
+    fn the_tui_keys_outside_the_tui_tables_are_not_read() {
+        let (_root_dir, root_paths) = write(
+            r#"
+            keybinds = "emacs"
+            contact-command = "khard email --parsable %s"
+            contact-complete-key = "ctrl-space"
 
             [theme]
             preset = "tokyo-night"
 
-            [accounts.example]
+            [accounts.work]
             default = true
-            email = "alice@example.org"
+            "#,
+        );
+
+        let config = Config::load(&root_paths).unwrap();
+
+        assert_eq!(config.tui.keybinds, None);
+        assert_eq!(config.tui.contact_command, None);
+        assert_eq!(config.tui.contact_complete_key, None);
+        assert!(config.tui.theme.preset.is_none());
+
+        let err = format!("{:#}", resolve_account(&root_paths, None).unwrap_err());
+        let keys = [
+            "keybinds",
+            "contact-command",
+            "contact-complete-key",
+            "theme",
+        ];
+        let named = keys.map(|key| format!("unknown field `{key}`"));
+        assert!(named.iter().any(|key| err.contains(key)), "{err}");
+
+        let (_account_dir, account_paths) = write(
+            r#"
+            [accounts.work]
+            default = true
             contact-command = ["abook", "--mutt-query", "%s"]
-            imap.server = "example.com"
-        "#;
+            "#,
+        );
 
-        let config: Config = toml::from_str(toml).unwrap();
-        let account = config.accounts.get("example").unwrap();
+        let mut config = Config::load(&account_paths).unwrap();
+        let account = config.accounts.remove("work").unwrap();
 
-        assert!(config.keybinds.is_some());
-        assert!(config.contact_command.is_some());
-        assert!(account.default);
-        assert!(account.contact_command.is_some());
+        assert_eq!(account.tui.contact_command, None);
 
-        let himalaya: himalaya::config::Config = toml::from_str(toml).unwrap();
-        assert!(himalaya.accounts.contains_key("example"));
+        let err = format!("{:#}", resolve_account(&account_paths, None).unwrap_err());
+        assert!(err.contains("unknown field `contact-command`"), "{err}");
     }
 
     /// The shipped sample is the reference the README points at, so it
-    /// loads in the TUI and in himalaya alike.
+    /// loads in the TUI and in himalaya alike, as written and uncommented.
     #[test]
     fn shipped_sample_config_loads() {
         let sample = include_str!("../config.sample.toml");
@@ -245,5 +377,28 @@ mod tests {
 
         let himalaya: Result<himalaya::config::Config, _> = toml::from_str(sample);
         assert!(himalaya.is_ok(), "himalaya reads the sample: {himalaya:?}");
+
+        let uncommented: String = sample
+            .lines()
+            .map(|line| match line.strip_prefix('#') {
+                Some(code) if code.starts_with(|c: char| c == '[' || c.is_ascii_lowercase()) => {
+                    code
+                }
+                _ => line,
+            })
+            .flat_map(|line| [line, "\n"])
+            .collect();
+
+        let mut config: Config = toml::from_str(&uncommented).expect("the TUI reads it all");
+        let account = config.accounts.remove("example").unwrap();
+
+        assert_eq!(config.tui.keybinds, Some(Keybinds::Vim));
+        assert!(config.tui.contact_command.is_some());
+        assert!(config.tui.theme.preset.is_some());
+        assert!(config.tui.theme.compose_selection.is_some());
+        assert!(account.tui.contact_command.is_some());
+
+        let himalaya: Result<himalaya::config::Config, _> = toml::from_str(&uncommented);
+        assert!(himalaya.is_ok(), "himalaya reads it all: {himalaya:?}");
     }
 }

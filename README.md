@@ -91,7 +91,22 @@ nix run
 
 ## Configuration
 
-The configuration is the [himalaya](https://github.com/pimalaya/himalaya) CLI's: the TUI runs himalaya's own commands, so an account, its backends, credentials, mailbox aliases and sent copy are configured once, as [himalaya's sample](https://github.com/pimalaya/himalaya/blob/master/config.sample.toml) documents them. The TUI adds a few keys of its own (composer keybindings, contact command, theme), documented in [config.sample.toml](./config.sample.toml), which himalaya ignores.
+The configuration is the [himalaya](https://github.com/pimalaya/himalaya) CLI's: the TUI runs himalaya's own commands, so an account, its backends, credentials, mailbox aliases and sent copy are configured once, as [himalaya's sample](https://github.com/pimalaya/himalaya/blob/master/config.sample.toml) documents them. The TUI adds a few keys of its own (composer keybindings, contact command, theme), documented in [config.sample.toml](./config.sample.toml). They live under a `[tui]` table at the top level and under `[accounts.<name>.tui]` in an account, which himalaya leaves to the TUI: written anywhere else, they are not read by the TUI and himalaya refuses the file, as it refuses any key it does not know.
+
+```toml
+[tui]
+keybinds = "emacs"
+contact-command = "khard email --parsable --remove-first-line %s"
+contact-complete-key = "tab"
+
+[tui.theme]
+preset = "tokyo-night"
+
+[accounts.work.tui]
+contact-command = ["abook", "--mutt-query", "%s"]
+```
+
+A file written for an earlier himalaya-tui moves its top-level `keybinds`, `contact-command`, `contact-complete-key` and `[theme]` under `[tui]` (`[theme.cursor]` becomes `[tui.theme.cursor]`), and an account's `contact-command` under `[accounts.<name>.tui]`.
 
 A configuration is loaded from the first valid path among:
 
@@ -114,13 +129,13 @@ Every variant works here, the Gmail API and Microsoft Graph ones included.
 
 ### Theming
 
-The TUI uses named ANSI colors by default, so the rendering inherits the colors of your terminal palette. Pick a preset and/or override individual fields in the `[theme]` block of your config (full reference in [config.sample.toml](./config.sample.toml)):
+The TUI uses named ANSI colors by default, so the rendering inherits the colors of your terminal palette. Pick a preset and/or override individual fields in the `[tui.theme]` block of your config (full reference in [config.sample.toml](./config.sample.toml)):
 
 ```toml
-[theme]
+[tui.theme]
 preset = "dracula-dark"
 
-[theme.cursor]
+[tui.theme.cursor]
 fg = "magenta"
 bg = "#222"
 mod = ["bold", "italic"]
@@ -164,7 +179,7 @@ Composer:
 | `Ctrl-e`, `Alt-e` | Hand off to `$VISUAL` or `$EDITOR` for the current draft |
 | `Esc` | Open the compose actions dialog (Send, Preview, Save to Drafts, Cancel) |
 
-The `--keybinds <vim|emacs>` flag, and the top-level `keybinds = "emacs"` TOML field, changes the in-app composer's edtui keybinds.
+The `--keybinds <vim|emacs>` flag, and the `keybinds = "emacs"` TOML field of the `[tui]` table, changes the in-app composer's edtui keybinds.
 
 In Vim mode `Ctrl-e` opens the external editor, edtui binding it in normal mode. In Emacs mode `Ctrl-e` moves to the end of the line instead, leaving `Alt-e` as the only system-editor key.
 

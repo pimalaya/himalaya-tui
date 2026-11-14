@@ -64,8 +64,8 @@ pub struct Cli {
     pub from_name: Option<String>,
     /// Keybinding flavor applied to the in-app composer.
     ///
-    /// Falls back to the top-level `keybinds` field of the configuration
-    /// when omitted, then to Vim.
+    /// Falls back to the `tui.keybinds` field of the configuration when
+    /// omitted, then to Vim.
     #[arg(long, value_name = "FLAVOR", value_enum)]
     pub keybinds: Option<Keybinds>,
     #[command(flatten)]
@@ -105,8 +105,8 @@ impl Cli {
             resolve_account(&paths, self.account.name.as_deref())?;
         let account = Account::from(config).merge(Account::from(account_config));
 
-        let mut tui = Config::load(&paths)?;
-        let tui_account = tui.accounts.remove(&account_name).unwrap_or_default();
+        let Config { tui, mut accounts } = Config::load(&paths)?;
+        let tui_account = accounts.remove(&account_name).unwrap_or_default().tui;
 
         let signature = signature_block(account.signature.as_deref(), account.signature_delim());
         let keybinds = self.keybinds.or(tui.keybinds);

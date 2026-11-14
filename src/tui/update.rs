@@ -351,7 +351,7 @@ fn complete_contact(model: &mut Model, target: ContactTarget) {
     let Some(command) = &model.contact_command else {
         set_status(
             model,
-            "No contact command configured, see `contact-command` in config.sample.toml",
+            "No contact command configured, see `tui.contact-command` in config.sample.toml",
         );
         return;
     };
