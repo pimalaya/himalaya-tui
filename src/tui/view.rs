@@ -98,7 +98,7 @@ fn get_border_style(model: &Model, panel: Panel) -> Style {
 }
 
 fn render_header(frame: &mut Frame, model: &Model, area: Rect) {
-    let title = format!(" Himalaya TUI — {} ", model.account_name);
+    let title = format!(" Himalaya TUI: {} ", model.account_name);
     let header = Paragraph::new(title).style(model.theme.header);
     frame.render_widget(header, area);
 }
