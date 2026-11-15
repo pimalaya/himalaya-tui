@@ -1298,7 +1298,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "himalaya"
 version = "2.2.1"
-source = "git+https://github.com/pimalaya/himalaya?rev=72175d1dfeeacae3988d463e547ac6ac2e87e358#72175d1dfeeacae3988d463e547ac6ac2e87e358"
+source = "git+https://github.com/pimalaya/himalaya?rev=e830c02e6c82a36b456faa0f65ef29aac9510304#e830c02e6c82a36b456faa0f65ef29aac9510304"
 dependencies = [
  "anyhow",
  "ariadne",
@@ -1607,9 +1607,9 @@ dependencies = [
 
 [[package]]
 name = "io-imap"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e8e9c025dbc82dc63da2a7d6fccb69c9613d9c30f0b31c0b439c62524cac3a1"
+checksum = "ea0344e4cee083928f82b34e2592ca41cf94755956f5c6308f21dd1f03fed361"
 dependencies = [
  "anyhow",
  "base64-codec",
