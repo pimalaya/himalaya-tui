@@ -33,7 +33,7 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.5", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.5.2", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
@@ -45,7 +45,7 @@ html2text = "0.17"
 log = "0.4"
 mime-meta-language = { version = "2", default-features = false, features = ["compiler", "interpreter"] }
 mime-rs = { version = "0.2", default-features = false, features = ["base64", "encoding", "parser"] }
-pimalaya-cli = { version = "0.5", default-features = false, features = ["spinner", "terminal"] }
+pimalaya-cli = { version = "0.5.2", default-features = false, features = ["spinner", "terminal"] }
 pimalaya-config = { version = "0.5", default-features = false, features = ["toml", "secret"] }
 ratatui = { version = "0.30", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

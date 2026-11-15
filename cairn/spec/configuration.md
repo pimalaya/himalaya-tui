@@ -45,11 +45,15 @@ Given `keybinds` at the top level or `contact-command` in an account, when the T
 
 ### Requirement: No configuration stops before the screen
 
-With no configuration file, or none resolving the account to open, the TUI SHALL fail before taking the screen with himalaya's error naming the path looked at and the documented sample.
+With no configuration file, or none resolving the account to open, the TUI SHALL fail before taking the screen with himalaya's error naming the path looked at and the documented sample, and exit 1. Under `--json` the error SHALL be the failure object on stdout.
 
 #### Scenario: No file at all
 
-Given no configuration file, when the TUI starts, then it prints the path it looked at and the sample's location, and exits without drawing the interface.
+Given no configuration file, when the TUI starts, then it prints the path it looked at and the sample's location, and exits 1 without drawing the interface.
+
+#### Scenario: No file, under --json
+
+Given no configuration file and no `-c`, when `himalaya-tui --json` starts, then it prints the failure object naming `<XDG_CONFIG_HOME>/himalaya/config.toml` and the sample on stdout, nothing on stderr, and exits 1.
 
 ### Requirement: The signature is assembled from its two keys
 

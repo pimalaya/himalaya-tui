@@ -62,7 +62,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Bumped ctutils to 0.4.6, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382, RUSTSEC-2026-0383 and RUSTSEC-2026-0385.
 - Changed piped `--json` output to print one value per line (pimalaya-cli `55b6693`).
 - Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for the message bodies the TUI renders.
-- Moved to pimalaya-cli and pimalaya-config 0.5 and mime-rs 0.2 from crates.io. himalaya and mml stay pinned by git revision until their releases.
+- Changed a command line the grammar refuses to answer as himalaya's does: exit 2 with clap's error on stderr, or under `--json` the failure object coded `usage-invalid` on stdout and nothing on stderr, where `--json` was ignored.
+- Changed the `completion` and `manual` abouts to himalaya's, and their failures to carry himalaya's code as a failure to open the account does.
+- Moved to pimalaya-cli 0.5.2, pimalaya-config 0.5 and mime-rs 0.2 from crates.io. himalaya and mml stay pinned by git revision until their releases.
 
   An HTML-only body is now rendered by html2text, undecorated: headings, lists and paragraphs keep their layout and long lines wrap at 80 columns, where they used to run together.
 

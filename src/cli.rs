@@ -229,13 +229,12 @@ fn signature_block(signature: Option<&str>, delim: &str) -> String {
     format!("{delim}{}", signature.trim_end_matches('\n'))
 }
 
-/// Auxiliary subcommands, the interface running when none is given.
+/// The standard subcommands, in himalaya's order and with its abouts, the
+/// interface running when none is given.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Generate shell completion scripts.
     #[command(alias = "completions")]
     Completion(CompletionCommand),
-    /// Generate man pages.
     #[command(alias = "manuals")]
     Manual(ManualCommand),
 }

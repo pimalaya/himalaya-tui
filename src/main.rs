@@ -42,7 +42,8 @@
 //!
 //! ## Startup
 //!
-//! [`main`] parses the CLI flags, runs any auxiliary subcommand
+//! [`main`] parses the CLI flags through pimalaya-cli, so a refused
+//! command line answers as in himalaya, runs any standard subcommand
 //! (completions, manuals), otherwise builds the [`tui::model::Model`],
 //! loading the mailboxes and the first page before the interface takes
 //! the terminal, and hands it to [`tui::app::run`]. With no configuration
@@ -55,9 +56,8 @@ mod contact;
 mod email;
 mod tui;
 
-use clap::Parser;
 use himalaya::error::{self, ErrorCode};
-use pimalaya_cli::{error::ErrorReport, printer::StdoutPrinter, session::claim_stdin};
+use pimalaya_cli::{clap::parse, error::ErrorReport, printer::StdoutPrinter, session::claim_stdin};
 use simd_cpu::SimdCpu;
 
 use crate::{cli::Cli, tui::app};
@@ -71,12 +71,14 @@ fn main() {
     // its input from stdin is refused rather than reading it.
     claim_stdin();
 
-    let cli = Cli::parse();
+    // A refused command line exits 2, the failure object coded
+    // `usage-invalid` on stdout under `--json`, as in himalaya.
+    let cli = parse::<Cli>();
     let mut printer = StdoutPrinter::new(&cli.json);
 
     if let Some(command) = cli.command {
-        let result = command.execute(&mut printer);
-        return ErrorReport::eval(&mut printer, result);
+        let result = command.execute(&mut printer).map_err(error::coded);
+        return ErrorReport::<ErrorCode>::eval_coded(&mut printer, result);
     }
 
     // NOTE: an account the configuration cannot give, or a backend the
