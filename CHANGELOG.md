@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Added himalaya's failure codes to a failure to open the account: `account-missing`, `account-default-missing`, `account-default-several`, `backend-not-built`. `-a default` names an account called `default`.
 - Added the three-pane terminal interface: mailboxes, envelopes, and the message body or the composer.
 
   The envelope list is paged one screenful at a time, and the page count comes from the `total` himalaya's `envelope list` reports. A backend reporting none (Gmail, Microsoft Graph) shows `(page n)` and pages on while himalaya names a next page.

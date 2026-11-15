@@ -56,6 +56,7 @@ mod email;
 mod tui;
 
 use clap::Parser;
+use himalaya::error::{self, ErrorCode};
 use pimalaya_cli::{error::ErrorReport, printer::StdoutPrinter, session::claim_stdin};
 use simd_cpu::SimdCpu;
 
@@ -78,8 +79,10 @@ fn main() {
         return ErrorReport::eval(&mut printer, result);
     }
 
-    let result = cli.try_into_tui_model();
-    let model = ErrorReport::eval(&mut printer, result);
+    // NOTE: an account the configuration cannot give, or a backend the
+    // build leaves out, fails with himalaya's own code.
+    let result = cli.try_into_tui_model().map_err(error::coded);
+    let model = ErrorReport::<ErrorCode>::eval_coded(&mut printer, result);
 
     let result = app::run(model);
     ErrorReport::eval(&mut printer, result);

@@ -9,7 +9,7 @@ The TUI reads the himalaya CLI's configuration file, resolving the account, its 
 
 ### Requirement: The account to open is named by `-a`, never positionally
 
-`-a` names the account to open among those the configuration holds, and the default one is opened without it. `-c` takes one path per flag, repeated to merge files, as the himalaya CLI takes it. No positional argument is taken.
+`-a` names the account to open among those the configuration holds, and the default one is opened without it. `-a default` names an account called `default`, a name like any other. A failure to open the account SHALL carry himalaya's code: `account-missing`, `account-default-missing`, `account-default-several`, or `backend-not-built` for a backend the build leaves out. `-c` takes one path per flag, repeated to merge files, as the himalaya CLI takes it. No positional argument is taken.
 
 #### Scenario: No account is named
 
