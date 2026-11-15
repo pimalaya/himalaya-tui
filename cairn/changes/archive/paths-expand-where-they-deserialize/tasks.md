@@ -13,4 +13,4 @@ change: paths-expand-where-they-deserialize
 - [x] CHANGELOG.md: the backends bullet names the expansion.
 - [x] cargo fmt, cargo check, cargo test and cargo clippy on all features, plus the per-backend feature builds.
 - [x] The live configuration at ~/.himalayarc loads through the binary.
-- [x] Fold the delta into [cairn/spec/configuration.md](../../spec/configuration.md); write [cairn/log/2026-08-29-paths-expand-where-they-deserialize.md](../../log/2026-08-29-paths-expand-where-they-deserialize.md).
+- [x] Fold the delta into [cairn/spec/configuration.md](../../../spec/configuration.md); write [cairn/log/2026-08-29-paths-expand-where-they-deserialize.md](../../../log/2026-08-29-paths-expand-where-they-deserialize.md).

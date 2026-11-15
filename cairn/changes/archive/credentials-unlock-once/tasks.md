@@ -15,4 +15,4 @@ change: credentials-unlock-once
 - [x] Tests: one command named by two blocks is spawned once.
 - [x] CHANGELOG.md: the authentication bullet names the single unlock.
 - [x] cargo fmt, cargo check and cargo test on all features, plus the per-backend feature builds.
-- [x] Fold the delta into [cairn/spec/configuration.md](../../spec/configuration.md); write [cairn/log/2026-08-29-credentials-unlock-once.md](../../log/2026-08-29-credentials-unlock-once.md).
+- [x] Fold the delta into [cairn/spec/configuration.md](../../../spec/configuration.md); write [cairn/log/2026-08-29-credentials-unlock-once.md](../../../log/2026-08-29-credentials-unlock-once.md).

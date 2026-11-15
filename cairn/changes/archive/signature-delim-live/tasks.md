@@ -11,4 +11,4 @@ change: signature-delim-live
 - [x] Tests: the default separator, a custom one written verbatim, and an unset or blank signature yielding no block at all.
 - [x] config.sample.toml: the two keys documented under the new meaning, and the shared-file note, the identity and the signature no longer being TUI-only.
 - [x] CHANGELOG.md: the initial-release bullet for the two keys.
-- [x] Fold the delta into [cairn/spec/configuration.md](../../spec/configuration.md); write [cairn/log/2026-08-16-signature-delim-live.md](../../log/2026-08-16-signature-delim-live.md).
+- [x] Fold the delta into [cairn/spec/configuration.md](../../../spec/configuration.md); write [cairn/log/2026-08-16-signature-delim-live.md](../../../log/2026-08-16-signature-delim-live.md).

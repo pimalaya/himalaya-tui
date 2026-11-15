@@ -12,4 +12,4 @@ change: wizard-mirrors-the-cli
 - [x] Cargo.toml: io-pim-discovery `rfc8620`, shellexpand.
 - [x] Tests: the rendered block parses back and orders its keys, an appended block keeps the existing one, a taken name gets a suffix, discovered aliases render.
 - [x] README.md, config.sample.toml, CHANGELOG.md: the wizard writes now, and the two differences are named.
-- [x] Fold the delta into [cairn/spec/configuration.md](../../spec/configuration.md); write [cairn/log/2026-08-25-wizard-mirrors-the-cli.md](../../log/2026-08-25-wizard-mirrors-the-cli.md).
+- [x] Fold the delta into [cairn/spec/configuration.md](../../../spec/configuration.md); write [cairn/log/2026-08-25-wizard-mirrors-the-cli.md](../../../log/2026-08-25-wizard-mirrors-the-cli.md).

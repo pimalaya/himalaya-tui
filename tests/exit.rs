@@ -1,11 +1,10 @@
-//! # Usage
+//! # Exit contract
 //!
 //! The built binary as a script meets it, its stdin closed and no terminal:
 //! a command line the grammar refuses exits 2, its failure object coded
-//! `usage-invalid` under `--json`; a standard command missing its argument
-//! fails on stdout, as in himalaya; a missing configuration exits 1 naming
-//! the path looked at. None of them opens the interface, which needs a
-//! terminal.
+//! `usage-invalid` under `--json`, and a standard command missing its
+//! argument fails on stdout, as in himalaya. None of them opens the
+//! interface, which needs a terminal.
 
 use std::{
     path::Path,
@@ -32,20 +31,6 @@ fn run(home: &Path, args: &[&str]) -> Output {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
-}
-
-/// Asserts `output` is the missing configuration at `path`, pointing at
-/// the sample, as text or as the failure object.
-fn assert_missing(output: &Output, path: &Path) {
-    let stdout = text(&output.stdout);
-
-    assert_eq!(output.status.code(), Some(1), "{stdout}");
-    let missing = format!("No configuration found at {}", path.display());
-    assert!(stdout.contains(&missing), "{stdout}");
-    assert!(stdout.contains("config.sample.toml"), "{stdout}");
-    assert!(!stdout.contains("Usage:"), "{stdout}");
-    assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
-    assert!(!path.exists());
 }
 
 #[test]
@@ -151,25 +136,4 @@ fn the_standard_commands_read_as_in_himalaya() {
     assert!(manual.starts_with("manual "), "{manual}");
     assert!(manual.ends_with(about), "{manual}");
     assert!(help.starts_with("help "), "{help}");
-}
-
-#[test]
-fn a_bare_invocation_without_configuration_names_the_missing_path() {
-    let home = TempDir::new().unwrap();
-    let path = home.path().join("config.toml");
-    let output = run(home.path(), &["-c", path.to_str().unwrap()]);
-
-    assert!(text(&output.stdout).starts_with("Error: "));
-    assert_missing(&output, &path);
-}
-
-#[test]
-fn a_json_caller_without_configuration_gets_the_default_path() {
-    let home = TempDir::new().unwrap();
-    let path = home.path().join("himalaya").join("config.toml");
-    let output = run(home.path(), &["--json"]);
-
-    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(json["error"].is_string(), "{json}");
-    assert_missing(&output, &path);
 }

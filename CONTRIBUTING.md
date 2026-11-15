@@ -7,7 +7,7 @@ Whether you are a human or an AI agent, read these in order before touching the 
 1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
 2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide (Nix environment, build and check commands, dependency overrides, commit style), which chains to the shared architecture and guidelines;
 3. the inline header documentation in src/main.rs: it is the architecture document of this binary, covering the three-pane TUI, the backends and plumbing, and the wizard flow;
-4. the cairn/ folder for the development history and living plans (the Cairn convention: spec/, changes/, log/).
+4. the cairn/ folder for the development history and living plans (the Cairn convention: spec/, changes/, log/, landed changes moving to changes/archive/); `sh cairn/verify.sh` checks its structure.
 
 Everything below documents only what differs from the Pimalaya standards.
 
