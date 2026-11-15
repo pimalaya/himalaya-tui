@@ -192,7 +192,7 @@ fn render_envelopes(frame: &mut Frame, model: &mut Model, area: Rect) {
 
             let cells = vec![
                 Cell::from(format_flags(envelope, marked)),
-                Cell::from(envelope.subject.clone()),
+                Cell::from(envelope.subject.clone().unwrap_or_default()),
                 Cell::from(truncate(&format_from(envelope), 20)),
                 Cell::from(truncate(&format_date(envelope), 6)),
             ];

@@ -1298,7 +1298,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "himalaya"
 version = "2.2.1"
-source = "git+https://github.com/pimalaya/himalaya?rev=60e48de83889da89acdcd60282329c9c8778831a#60e48de83889da89acdcd60282329c9c8778831a"
+source = "git+https://github.com/pimalaya/himalaya?rev=0154fd1f0a19b7f7f93a8955842111ca70d1498a#0154fd1f0a19b7f7f93a8955842111ca70d1498a"
 dependencies = [
  "anyhow",
  "ariadne",
@@ -1705,9 +1705,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "772eaa836ddb21349245eda71daca1cd32060e46bc7b5f42c72e726e5087c12d"
+checksum = "c6cf5ebcd9bfd37226c344216632cb8aa7fc1db3b9766dc2eb8b27efe599e21c"
 dependencies = [
  "blake3",
  "encoding_rs",
@@ -2722,9 +2722,9 @@ dependencies = [
 
 [[package]]
 name = "pimalaya-cli"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "508f21310c6f082775d330a63e2b4523ba60ef3bbecd6613d8948a2a93a3737d"
+checksum = "d9d766697c997fe3ef5b1abc96d15967848a67f1c225a4f95e26782426ed1c94"
 dependencies = [
  "anyhow",
  "base64-codec",

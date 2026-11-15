@@ -18,9 +18,9 @@ pub struct Envelope {
     /// Flags set on the message, a sorted set: wire order means nothing.
     #[serde(default)]
     pub flags: BTreeSet<Flag>,
-    /// Subject header value.
+    /// Subject header value, `None` when the message has none.
     #[serde(default)]
-    pub subject: String,
+    pub subject: Option<String>,
     /// Sender(s).
     #[serde(default)]
     pub from: Vec<Address>,

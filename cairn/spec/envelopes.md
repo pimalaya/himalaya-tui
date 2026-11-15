@@ -37,6 +37,14 @@ Given a listing on screen, when the terminal is resized, then the page is re-cut
 
 Given a listing on screen, when a message or the composer opens under it, then the page is not re-cut and the selection does not move.
 
+### Requirement: A message without a subject is listed
+
+An envelope whose `subject` himalaya prints as `null`, a message without a `Subject:` header, SHALL be listed like any other, its subject cell empty.
+
+#### Scenario: A Maildir message without a subject
+
+Given a Maildir inbox holding a message with a `From:` header and no `Subject:`, when its envelopes are listed, then the page holds that envelope, its subject empty.
+
 ### Requirement: Navigation crosses the page boundary
 
 Moving past the end of a page SHALL load the next one and select its first envelope, and moving before the start of a page SHALL load the previous one and select its last. The paging keys SHALL land on the first envelope of the page they reach, whichever direction they moved in.

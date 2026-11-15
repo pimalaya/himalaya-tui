@@ -379,6 +379,18 @@ mod tests {
         assert!(client.is_connected());
     }
 
+    /// himalaya prints a missing `Subject:` as `null`.
+    #[test]
+    fn a_message_without_a_subject_is_listed() {
+        let (dir, mut client) = account(&[]);
+        let message = "From: a@localhost\r\n\r\nbody\r\n";
+        fs::write(dir.path().join("mail/cur/1:2,"), message).unwrap();
+
+        let page = client.list_envelopes("INBOX", 1, 10).unwrap();
+        assert_eq!(page.envelopes.len(), 1);
+        assert_eq!(page.envelopes[0].subject, None);
+    }
+
     #[test]
     fn a_raw_read_returns_the_message_bytes() {
         let (_dir, mut client) = account(&[("1", "Hello")]);
