@@ -2085,8 +2085,8 @@ checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
 
 [[package]]
 name = "mime-meta-language"
-version = "1.1.1"
-source = "git+https://github.com/pimalaya/mml?rev=3a548089208e5aae47fb5fee287a104308907343#3a548089208e5aae47fb5fee287a104308907343"
+version = "2.0.0"
+source = "git+https://github.com/pimalaya/mml?rev=338a723407ba0f39276f87deea960bd766baf779#338a723407ba0f39276f87deea960bd766baf779"
 dependencies = [
  "chumsky",
  "log",

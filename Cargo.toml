@@ -43,7 +43,7 @@ edtui = { version = "0.11", features = ["system-editor"] }
 himalaya = { version = "2.2", default-features = false }
 html2text = "0.17"
 log = "0.4"
-mime-meta-language = { version = "1.1", default-features = false, features = ["compiler", "interpreter"] }
+mime-meta-language = { version = "2", default-features = false, features = ["compiler", "interpreter"] }
 mime-rs = { version = "0.1", default-features = false, features = ["base64", "encoding", "parser"] }
 pimalaya-cli = { version = "0.4", default-features = false, features = ["spinner", "terminal"] }
 pimalaya-config = { version = "0.4", default-features = false, features = ["toml", "secret"] }
@@ -62,6 +62,6 @@ io-gmail = { git = "https://github.com/pimalaya/io-gmail", rev = "3dc66be58f95a1
 io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "da85d95e7155da62e5de9359d50f7caeca5edc50" }
 io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "26a77bbba0c3a52d5f681e0fe149385cbf4dc74a" }
 io-maildir = { git = "https://github.com/pimalaya/io-maildir", rev = "babeeb04eb50aa3c8a535d1b1fc1c5e547ba6088" }
-mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "3a548089208e5aae47fb5fee287a104308907343" }
+mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "338a723407ba0f39276f87deea960bd766baf779" }
 mime-rs = { git = "https://github.com/pimalaya/mime", rev = "2591e7fec9e3dd8b995d47323c6fa8868c558857" }
 pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "9952b7f1c6a2cb9890e06c32ea73ed873b00995f" }
