@@ -57,11 +57,11 @@ toml = "1.1"
 tui-input = { version = "0.15", default-features = false }
 
 [patch.crates-io]
-himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "81f40f9ef3be85cbeaaff30e502ac28c947ab91b" }
+himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "c650a1a2be974c3dac6be86ccb4e088efa15330f" }
 io-gmail = { git = "https://github.com/pimalaya/io-gmail", rev = "3dc66be58f95a136e8c722a745eb8cae1c17e316" }
 io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "da85d95e7155da62e5de9359d50f7caeca5edc50" }
 io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "26a77bbba0c3a52d5f681e0fe149385cbf4dc74a" }
 io-maildir = { git = "https://github.com/pimalaya/io-maildir", rev = "babeeb04eb50aa3c8a535d1b1fc1c5e547ba6088" }
-mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "338a723407ba0f39276f87deea960bd766baf779" }
+mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "22ca456f74b78eae13553f471e906a7d7fd7af1f" }
 mime-rs = { git = "https://github.com/pimalaya/mime", rev = "2591e7fec9e3dd8b995d47323c6fa8868c558857" }
-pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "9952b7f1c6a2cb9890e06c32ea73ed873b00995f" }
+pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "3bada992cde034a6aa9474c169b6e2f892776db1" }

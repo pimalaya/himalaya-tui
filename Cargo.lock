@@ -1298,7 +1298,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "himalaya"
 version = "2.2.1"
-source = "git+https://github.com/pimalaya/himalaya?rev=81f40f9ef3be85cbeaaff30e502ac28c947ab91b#81f40f9ef3be85cbeaaff30e502ac28c947ab91b"
+source = "git+https://github.com/pimalaya/himalaya?rev=c650a1a2be974c3dac6be86ccb4e088efa15330f#c650a1a2be974c3dac6be86ccb4e088efa15330f"
 dependencies = [
  "anyhow",
  "ariadne",
@@ -2086,7 +2086,7 @@ checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
 [[package]]
 name = "mime-meta-language"
 version = "2.0.0"
-source = "git+https://github.com/pimalaya/mml?rev=338a723407ba0f39276f87deea960bd766baf779#338a723407ba0f39276f87deea960bd766baf779"
+source = "git+https://github.com/pimalaya/mml?rev=22ca456f74b78eae13553f471e906a7d7fd7af1f#22ca456f74b78eae13553f471e906a7d7fd7af1f"
 dependencies = [
  "chumsky",
  "log",
@@ -2718,7 +2718,7 @@ dependencies = [
 [[package]]
 name = "pimalaya-cli"
 version = "0.4.0"
-source = "git+https://github.com/pimalaya/cli?rev=9952b7f1c6a2cb9890e06c32ea73ed873b00995f#9952b7f1c6a2cb9890e06c32ea73ed873b00995f"
+source = "git+https://github.com/pimalaya/cli?rev=3bada992cde034a6aa9474c169b6e2f892776db1#3bada992cde034a6aa9474c169b6e2f892776db1"
 dependencies = [
  "anyhow",
  "base64-codec",
