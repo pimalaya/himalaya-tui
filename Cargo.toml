@@ -33,7 +33,7 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.5", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
@@ -44,9 +44,9 @@ himalaya = { version = "2.2", default-features = false }
 html2text = "0.17"
 log = "0.4"
 mime-meta-language = { version = "2", default-features = false, features = ["compiler", "interpreter"] }
-mime-rs = { version = "0.1", default-features = false, features = ["base64", "encoding", "parser"] }
-pimalaya-cli = { version = "0.4", default-features = false, features = ["spinner", "terminal"] }
-pimalaya-config = { version = "0.4", default-features = false, features = ["toml", "secret"] }
+mime-rs = { version = "0.2", default-features = false, features = ["base64", "encoding", "parser"] }
+pimalaya-cli = { version = "0.5", default-features = false, features = ["spinner", "terminal"] }
+pimalaya-config = { version = "0.5", default-features = false, features = ["toml", "secret"] }
 ratatui = { version = "0.30", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -57,12 +57,5 @@ toml = "1.1"
 tui-input = { version = "0.15", default-features = false }
 
 [patch.crates-io]
-himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "bf7b698799e79cd25d7776ceedff3e4d64958bb3" }
-io-gmail = { git = "https://github.com/pimalaya/io-gmail", rev = "3dc66be58f95a136e8c722a745eb8cae1c17e316" }
-io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "da85d95e7155da62e5de9359d50f7caeca5edc50" }
-io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "26a77bbba0c3a52d5f681e0fe149385cbf4dc74a" }
-io-maildir = { git = "https://github.com/pimalaya/io-maildir", rev = "babeeb04eb50aa3c8a535d1b1fc1c5e547ba6088" }
-mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "567dc9f223876e9c1d607a50117d224304bc3131" }
-mime-rs = { git = "https://github.com/pimalaya/mime", rev = "2591e7fec9e3dd8b995d47323c6fa8868c558857" }
-pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "8190dc544e277aeeba6acc43817100179f19643b" }
-pimalaya-config = { git = "https://github.com/pimalaya/config", rev = "d5a33cba3fe9826b82f15a479043a7f79ca742ce" }
+himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "72175d1dfeeacae3988d463e547ac6ac2e87e358" }
+mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "563dd518688b447db138f0ea8a54be31a3c142c6" }
