@@ -60,6 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ```
 
 - Bumped pimalaya-config to 0.5.2: an unknown key's error lists no removed key.
+- Bumped io-imap to 0.11.2, within himalaya's pin: an IMAP envelope list sorted by date places a message whose `Date:` names a wrong day-of-week at the date it shows.
+- Bumped io-msgraph to 0.9.2, within himalaya's pin: no change for the TUI, which writes no event series.
 - Bumped ctutils to 0.4.6, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382, RUSTSEC-2026-0383 and RUSTSEC-2026-0385.
 - Changed piped `--json` output to print one value per line (pimalaya-cli `55b6693`).
 - Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for the message bodies the TUI renders.
