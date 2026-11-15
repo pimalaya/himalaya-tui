@@ -19,6 +19,10 @@ Given a mailbox named `Old projects`, when its envelopes are listed, then `-m` r
 
 Given an envelope on screen, when it is read, then `message read --raw` runs without `--seen`, its bytes are decoded as before, and the message's flags are left as they were.
 
+### Requirement: A build with no backend refuses to start
+
+A build with none of the backend cargo features (`imap`, `smtp`, `jmap`, `gmail`, `msgraph`, `maildir`, `mbox`, `pimdir`) SHALL compile, and SHALL refuse to start once the account resolves, naming those features: himalaya merges no account without one, and no mailbox could be reached.
+
 ### Requirement: A partial outcome is a result
 
 A command ending with a partial outcome SHALL be read as a result, its `errors` naming what failed, and only an error carrying no result SHALL be read as a failure. The status bar SHALL say how many items the command acted on and what failed.

@@ -47,6 +47,8 @@ impl MailClient {
         let config_paths: &'static [PathBuf] = Vec::leak(config_paths);
         let name: Option<&'static str> = account.map(|name| &*String::leak(name));
 
+        // NOTE: a build with no backend leaves Session no other field.
+        #[cfg_attr(not(backend), allow(clippy::needless_update))]
         let session = Session {
             account: SessionAccount {
                 config_paths,

@@ -10,7 +10,13 @@ use std::{env::temp_dir, fs::File, time::Instant};
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use edtui::{EditorState, Lines};
-use himalaya::{account::context::Account, backend::Backend, cli::resolve_account};
+#[cfg(backend)]
+use himalaya::account::context::Account;
+use himalaya::{
+    backend::Backend,
+    cli::resolve_account,
+    config::{AccountConfig, Config as HimalayaConfig},
+};
 use pimalaya_cli::{
     clap::{
         args::{AccountFlag, ConfigFlags, JsonFlag, LogFlags},
@@ -103,12 +109,11 @@ impl Cli {
         // fails with the CLI's own error, before anything is drawn.
         let (config, account_name, account_config) =
             resolve_account(&paths, self.account.name.as_deref())?;
-        let account = Account::from(config).merge(Account::from(account_config));
+        let account = AccountIdentity::new(config, account_config)?;
 
         let Config { tui, mut accounts } = Config::load(&paths)?;
         let tui_account = accounts.remove(&account_name).unwrap_or_default().tui;
 
-        let signature = signature_block(account.signature.as_deref(), account.signature_delim());
         let keybinds = self.keybinds.or(tui.keybinds);
         let contact_command = tui_account.contact_command.or(tui.contact_command);
         let client = MailClient::new(paths, Some(account_name.clone()), self.backend);
@@ -134,7 +139,7 @@ impl Cli {
             account_name,
             from: self.from.or(account.email),
             from_name: self.from_name.or(account.display_name),
-            signature,
+            signature: account.signature,
             status_message: None,
             deferred: None,
             bottom_panel: BottomPanel::None,
@@ -172,12 +177,50 @@ fn startup_page_size() -> usize {
     view::envelope_capacity(rows.saturating_sub(2)).max(1)
 }
 
+/// What the composer takes from the account himalaya merges from the
+/// configuration's global keys and the account's own.
+#[cfg_attr(not(backend), allow(dead_code))]
+struct AccountIdentity {
+    /// The block the composer appends, see [`signature_block`].
+    signature: String,
+    /// The sender address.
+    email: Option<String>,
+    /// The name that address carries.
+    display_name: Option<String>,
+}
+
+impl AccountIdentity {
+    #[cfg(backend)]
+    fn new(config: HimalayaConfig, account_config: AccountConfig) -> Result<Self> {
+        let account = Account::from(config).merge(Account::from(account_config));
+        let signature = signature_block(account.signature.as_deref(), account.signature_delim());
+
+        Ok(Self {
+            signature,
+            email: account.email,
+            display_name: account.display_name,
+        })
+    }
+
+    /// A build with no backend reaches no mailbox: it refuses to start,
+    /// naming the cargo features that give it one.
+    #[cfg(not(backend))]
+    fn new(_: HimalayaConfig, _: AccountConfig) -> Result<Self> {
+        anyhow::bail!(
+            "This himalaya-tui was built with no backend: build it with one of \
+             the imap, smtp, jmap, gmail, msgraph, maildir, mbox or pimdir \
+             cargo features"
+        )
+    }
+}
+
 /// Assembles the block the composer appends: separator, then signature.
 ///
 /// Empty when the account declares no signature, so nothing is appended
 /// at all. mml writes what it is given verbatim, so the separator is
 /// resolved here rather than expected inside the configured value: one
 /// file, one meaning, whichever binary composes.
+#[cfg_attr(not(backend), allow(dead_code))]
 fn signature_block(signature: Option<&str>, delim: &str) -> String {
     let Some(signature) = signature.filter(|signature| !signature.trim().is_empty()) else {
         return String::new();
