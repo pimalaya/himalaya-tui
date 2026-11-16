@@ -1298,7 +1298,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "himalaya"
 version = "2.2.1"
-source = "git+https://github.com/pimalaya/himalaya?rev=0154fd1f0a19b7f7f93a8955842111ca70d1498a#0154fd1f0a19b7f7f93a8955842111ca70d1498a"
+source = "git+https://github.com/pimalaya/himalaya?rev=d98528b54eff33dd546c39caf11c7d7b319acbf4#d98528b54eff33dd546c39caf11c7d7b319acbf4"
 dependencies = [
  "anyhow",
  "ariadne",
@@ -1705,9 +1705,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6cf5ebcd9bfd37226c344216632cb8aa7fc1db3b9766dc2eb8b27efe599e21c"
+checksum = "f19a7e961bd806c87280d35695f5a92e7ba34b4fe971ffd7577891bae3775764"
 dependencies = [
  "blake3",
  "encoding_rs",
@@ -2090,7 +2090,7 @@ checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
 [[package]]
 name = "mime-meta-language"
 version = "2.0.0"
-source = "git+https://github.com/pimalaya/mml?rev=563dd518688b447db138f0ea8a54be31a3c142c6#563dd518688b447db138f0ea8a54be31a3c142c6"
+source = "git+https://github.com/pimalaya/mml?rev=9a214d8b5bc182b211400488550190def6e94db7#9a214d8b5bc182b211400488550190def6e94db7"
 dependencies = [
  "chumsky",
  "log",

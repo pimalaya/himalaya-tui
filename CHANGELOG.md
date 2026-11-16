@@ -67,7 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for the message bodies the TUI renders.
 - Changed a command line the grammar refuses to answer as himalaya's does: exit 2 with clap's error on stderr, or under `--json` the failure object coded `usage-invalid` on stdout and nothing on stderr, where `--json` was ignored.
 - Changed the `completion` and `manual` abouts to himalaya's, and their failures to carry himalaya's code as a failure to open the account does.
-- Changed the pimdir backend to open stores of pimdir storage-draft-13 (io-pimdir 0.14.0, through himalaya 0154fd1f): a store an earlier neverest wrote is refused with himalaya's `store-version` failure in the status bar. Rebuild it as neverest's MIGRATION.md says.
+- Changed the pimdir backend to open stores of pimdir storage-draft-13 (io-pimdir 0.14.1, through himalaya d98528b5): a store an earlier neverest wrote is refused with himalaya's `store-version` failure in the status bar. Rebuild it as neverest's MIGRATION.md says.
 - Moved to pimalaya-cli 0.6.0, pimalaya-config 0.5.2 and mime-rs 0.2 from crates.io. himalaya and mml stay pinned by git revision until their releases.
 
   An HTML-only body is now rendered by html2text, undecorated: headings, lists and paragraphs keep their layout and long lines wrap at 80 columns, where they used to run together.
