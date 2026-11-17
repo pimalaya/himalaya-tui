@@ -5,6 +5,11 @@
 ignore = [
   { id = "RUSTSEC-2024-0320", reason = "yaml-rust unmaintained, transitive via syntect; no upstream fix yet" },
   { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained, transitive via syntect; no upstream fix yet" },
+
+  # chrono is unmaintained, not vulnerable, with no maintained release to
+  # move to. imap-types exposes it in its API (duesee/imap-codec#752), and
+  # the family moves its own code to jiff.
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, see duesee/imap-codec#752" },
 ]
 
 [sources]
