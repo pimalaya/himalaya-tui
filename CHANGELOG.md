@@ -60,7 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ```
 
 - Bumped pimalaya-config to 0.6.0: an unknown key's error lists no removed key.
-- Bumped himalaya to 0cb2ff4d: a mailbox the backend does not hold fails coded `mailbox-not-found` on IMAP, JMAP, Gmail and Microsoft Graph; an IMAP group marker (`undisclosed-recipients:;`) lists no recipient; a Gmail sender whose quoted name holds a comma is one sender; a Maildir or mbox page no longer holds the whole mailbox in memory; an IMAP read of a mailbox named by its role resolves it as the listing does; a pimdir move, copy or delete of several messages is staged whole or not at all.
+- Bumped himalaya to bffef6aa: a configured `pimdir.account` on a store that holds nothing yet is read as named; a mailbox the backend does not hold fails coded `mailbox-not-found` on IMAP, JMAP, Gmail and Microsoft Graph; an IMAP group marker (`undisclosed-recipients:;`) lists no recipient; a Gmail sender whose quoted name holds a comma is one sender; a Maildir or mbox page no longer holds the whole mailbox in memory; an IMAP read of a mailbox named by its role resolves it as the listing does; a pimdir move, copy or delete of several messages is staged whole or not at all.
 - Bumped io-imap to 0.11.2, within himalaya's pin: an IMAP envelope list sorted by date places a message whose `Date:` names a wrong day-of-week at the date it shows.
 - Bumped io-msgraph to 0.9.2, within himalaya's pin: no change for the TUI, which writes no event series.
 - Bumped ctutils to 0.4.6, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382, RUSTSEC-2026-0383 and RUSTSEC-2026-0385.
@@ -68,9 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the message parser from mail-parser to [mime-rs](https://github.com/pimalaya/mime-rs), the one the himalaya CLI uses, for the message bodies the TUI renders.
 - Changed a command line the grammar refuses to answer as himalaya's does: exit 2 with clap's error on stderr, or under `--json` the failure object coded `usage-invalid` on stdout and nothing on stderr, where `--json` was ignored.
 - Changed the `completion` and `manual` abouts to himalaya's, and their failures to carry himalaya's code as a failure to open the account does.
-- Changed the pimdir backend to open stores of pimdir storage-draft-14 (io-pimdir 0.17.0, through himalaya 0cb2ff4d): a store of another format version, storage-draft-13 included, is refused with himalaya's `store-version` failure in the status bar, worded as every pimdir program words it. Sync it with the engine that wrote it until nothing is queued, move its directory aside and sync a new store.
-- Changed, through pimalaya-cli 0.6.1 and pimalaya-config 0.6.0, the error a failure to start prints to sanitize the control characters of its causes, a TOML parse error of the configuration to leave its source line out, and a failing secret command to be named without its output.
-- Moved to pimalaya-cli 0.6.1, pimalaya-config 0.6.0 and mime-rs 0.2 from crates.io. himalaya (0cb2ff4d) and mml (1b9f3f2) stay pinned by git revision until himalaya 3.0 and mml 2.0 are released.
+- Changed the pimdir backend to open stores of pimdir storage-draft-14 (io-pimdir 0.18.0, through himalaya bffef6aa): a store of another format version, storage-draft-13 included, is refused with himalaya's `store-version` failure in the status bar, worded as every pimdir program words it. Sync it with the engine that wrote it until nothing is queued, move its directory aside and sync a new store.
+- Changed, through pimalaya-cli 0.7.0 and pimalaya-config 0.6.0, the error a failure to start prints to sanitize the control characters of its causes, a TOML parse error of the configuration to leave its source line out, and a failing secret command to be named without its output.
+- Moved to pimalaya-cli 0.7.0, pimalaya-config 0.6.0 and mime-rs 0.2 from crates.io. himalaya (bffef6aa) and mml (d7a27af) stay pinned by git revision until himalaya 3.0 and mml 2.0 are released.
 
   An HTML-only body is now rendered by html2text, undecorated: headings, lists and paragraphs keep their layout and long lines wrap at 80 columns, where they used to run together.
 
