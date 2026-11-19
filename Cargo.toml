@@ -33,7 +33,7 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.6.0", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.6.1", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
@@ -45,8 +45,8 @@ html2text = "0.17"
 log = "0.4"
 mime-meta-language = { version = "2", default-features = false, features = ["compiler", "interpreter"] }
 mime-rs = { version = "0.2", default-features = false, features = ["base64", "encoding", "parser"] }
-pimalaya-cli = { version = "0.6.0", default-features = false, features = ["spinner", "terminal"] }
-pimalaya-config = { version = "0.5.2", default-features = false, features = ["toml", "secret"] }
+pimalaya-cli = { version = "0.6.1", default-features = false, features = ["spinner", "terminal"] }
+pimalaya-config = { version = "0.6.0", default-features = false, features = ["toml", "secret"] }
 ratatui = { version = "0.30", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -57,5 +57,5 @@ toml = "1.1"
 tui-input = { version = "0.15", default-features = false }
 
 [patch.crates-io]
-himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "d98528b54eff33dd546c39caf11c7d7b319acbf4" }
-mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "9a214d8b5bc182b211400488550190def6e94db7" }
+himalaya = { git = "https://github.com/pimalaya/himalaya", rev = "0cb2ff4d41da4f0d94786b0facab592365f14932" }
+mime-meta-language = { git = "https://github.com/pimalaya/mml", rev = "1b9f3f21e4b9be3131f0a00f1159f9baa881b235" }

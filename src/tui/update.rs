@@ -1184,6 +1184,10 @@ fn do_send(model: &mut Model) {
                 (false, true) => "Message sent, a copy saved",
                 (false, false) => "Message sent",
             };
+            let status = match receipt.errors.first() {
+                Some(err) => format!("{status}, error: {err}"),
+                None => String::from(status),
+            };
             set_status(model, status);
             cancel_compose(model);
         }
@@ -1626,5 +1630,113 @@ mod tests {
         let status = model.status_message.clone().unwrap();
         assert!(status.contains("mailbox.alias.trash"), "{status}");
         assert_eq!(model.envelopes.len(), 1);
+    }
+
+    /// Sending over a scripted SMTP server on the loopback.
+    #[cfg(all(feature = "smtp", feature = "maildir"))]
+    mod send {
+        use std::{
+            fs,
+            io::{BufRead, BufReader, Write},
+            net::{TcpListener, TcpStream},
+            thread,
+        };
+
+        use edtui::{EditorState, Lines};
+        use himalaya::backend::Backend;
+        use tempfile::TempDir;
+
+        use crate::{
+            client::MailClient,
+            tui::{
+                model::{Blocking, BottomPanel, Message, Model, Panel},
+                update::tests::run,
+            },
+        };
+
+        /// Starts an SMTP server accepting every message and returns its
+        /// address.
+        fn serve() -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap().to_string();
+
+            thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    thread::spawn(move || session(stream));
+                }
+            });
+
+            addr
+        }
+
+        /// Answers one connection, reading the message after `DATA` to its
+        /// dot.
+        fn session(stream: TcpStream) {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut out = stream;
+            let mut line = String::new();
+            let _ = out.write_all(b"220 test ESMTP\r\n");
+
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let command = line.to_ascii_uppercase();
+                let reply = if command.starts_with("EHLO") {
+                    "250-test\r\n250 8BITMIME\r\n"
+                } else if command.starts_with("DATA") {
+                    let _ = out.write_all(b"354 go\r\n");
+                    while line != ".\r\n" {
+                        line.clear();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            return;
+                        }
+                    }
+                    "250 queued\r\n"
+                } else if command.starts_with("QUIT") {
+                    let _ = out.write_all(b"221 bye\r\n");
+                    return;
+                } else {
+                    "250 ok\r\n"
+                };
+
+                if out.write_all(reply.as_bytes()).is_err() {
+                    return;
+                }
+                line.clear();
+            }
+        }
+
+        /// The message went out, so the composer closes: sending again
+        /// would send twice. The copy that failed after it is named.
+        #[test]
+        fn a_sent_message_whose_copy_failed_names_the_failure() {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path().join("mail");
+            for sub in ["cur", "new", "tmp"] {
+                fs::create_dir_all(root.join(sub)).unwrap();
+            }
+
+            let config = dir.path().join("config.toml");
+            let toml = format!(
+                "[accounts.test]\ndefault = true\nemail = \"t@localhost\"\n\
+                 maildir.root = {:?}\nsmtp.server = \"smtp://{}\"\n\
+                 message.send.save-copy = \"Nowhere\"\n",
+                root.display().to_string(),
+                serve(),
+            );
+            fs::write(&config, toml).unwrap();
+
+            let client = MailClient::new(vec![config], None, Backend::Auto);
+            let mut model = Model::for_tests(client, 10);
+            let draft = "From: t@localhost\nTo: bob@localhost\nSubject: Hi\n\nhi\n";
+            model.editor_state = EditorState::new(Lines::from(draft));
+            model.bottom_panel = BottomPanel::Compose;
+            model.active_panel = Panel::Compose;
+
+            run(&mut model, Message::Run(Blocking::Send));
+
+            let status = model.status_message.clone().unwrap();
+            assert!(status.starts_with("Message sent, error: "), "{status}");
+            assert!(status.contains("Nowhere"), "{status}");
+            assert_eq!(model.bottom_panel, BottomPanel::None);
+        }
     }
 }

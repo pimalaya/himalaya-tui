@@ -278,6 +278,9 @@ pub struct SendReceipt {
     /// Whether a sync engine sends or saves it later (pimdir).
     #[serde(default)]
     pub queued: bool,
+    /// What failed after the message went out, such as its copy.
+    #[serde(default)]
+    pub errors: Vec<ItemError>,
 }
 
 /// The error of one item a command could not act on.
