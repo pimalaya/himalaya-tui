@@ -55,7 +55,7 @@ fn apply(model: &mut Model, msg: Message) -> Option<Message> {
 
         Message::Ping => {
             if let Err(err) = model.client.keep_alive() {
-                log::warn!("Keepalive failed: {err}");
+                log::warn!("Keepalive failed: {err:#}");
             }
             model.last_activity = Instant::now();
             None
@@ -381,7 +381,7 @@ fn poll_contact_lookup(model: &mut Model) {
 
     let mut contacts = match result {
         Ok(contacts) => contacts,
-        Err(err) => return set_status(model, format!("Error: {err}")),
+        Err(err) => return set_status(model, format!("Error: {err:#}")),
     };
 
     match contacts.len() {
@@ -773,7 +773,10 @@ fn start_compose(model: &mut Model) {
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
-        Err(err) => set_status(model, format!("Error building template: {err}")),
+        Err(err) => set_status(
+            model,
+            format!("Error building template: {:#}", anyhow::Error::from(err)),
+        ),
     }
 }
 
@@ -792,7 +795,10 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
     let quote = match MmlTemplateReplyBuilder::quote_options().interpret_msg(msg) {
         Ok(quote) => quote,
         Err(err) => {
-            set_status(model, format!("Error rendering the quote: {err}"));
+            set_status(
+                model,
+                format!("Error rendering the quote: {:#}", anyhow::Error::from(err)),
+            );
             return;
         }
     };
@@ -808,7 +814,13 @@ fn start_reply(model: &mut Model, raw_message: &[u8], reply_all: bool) {
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
-        Err(err) => set_status(model, format!("Error building reply template: {err}")),
+        Err(err) => set_status(
+            model,
+            format!(
+                "Error building reply template: {:#}",
+                anyhow::Error::from(err)
+            ),
+        ),
     }
 }
 
@@ -822,7 +834,10 @@ fn start_forward(model: &mut Model, raw_message: &[u8]) {
     let quote = match MmlTemplateForwardBuilder::quote_options().interpret_msg(msg) {
         Ok(quote) => quote,
         Err(err) => {
-            set_status(model, format!("Error rendering the quote: {err}"));
+            set_status(
+                model,
+                format!("Error rendering the quote: {:#}", anyhow::Error::from(err)),
+            );
             return;
         }
     };
@@ -837,7 +852,13 @@ fn start_forward(model: &mut Model, raw_message: &[u8]) {
 
     match tpl {
         Ok(tpl) => open_editor_with_template(model, &tpl.content, &tpl.cursor),
-        Err(err) => set_status(model, format!("Error building forward template: {err}")),
+        Err(err) => set_status(
+            model,
+            format!(
+                "Error building forward template: {:#}",
+                anyhow::Error::from(err)
+            ),
+        ),
     }
 }
 
@@ -873,7 +894,7 @@ fn load_mailboxes(model: &mut Model) -> Option<Message> {
             }
         }
         Err(err) => {
-            set_status(model, format!("Error: {err}"));
+            set_status(model, format!("Error: {err:#}"));
             None
         }
     }
@@ -917,7 +938,7 @@ fn load_envelopes(model: &mut Model, mut landing: EnvelopeLanding) {
                 return;
             }
             Err(e) => {
-                set_status(model, format!("Error: {e}"));
+                set_status(model, format!("Error: {e:#}"));
                 return;
             }
         }
@@ -936,9 +957,9 @@ fn read_selected(model: &mut Model) {
     match result {
         Ok(raw) => match decode_message_body(&raw) {
             Ok(content) => show_message(model, content),
-            Err(e) => set_status(model, format!("Error: {e}")),
+            Err(e) => set_status(model, format!("Error: {e:#}")),
         },
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -953,7 +974,7 @@ fn fetch_for_reply(model: &mut Model, reply_all: bool) {
     let result = model.client.read_message(&mailbox, &envelope.id);
     match result {
         Ok(raw) => start_reply(model, &raw, reply_all),
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -968,7 +989,7 @@ fn fetch_for_forward(model: &mut Model) {
     let result = model.client.read_message(&mailbox, &envelope.id);
     match result {
         Ok(raw) => start_forward(model, &raw),
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -997,7 +1018,7 @@ fn do_copy(model: &mut Model) {
                 receipt_status(|n| format!("Copied {n}"), &receipt, ids.len()),
             );
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -1033,7 +1054,7 @@ fn do_move(model: &mut Model) {
                 receipt_status(|n| format!("Moved {n}"), &receipt, ids.len()),
             );
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -1079,7 +1100,7 @@ fn do_flag(model: &mut Model, add: bool) {
             let done = |n| format!("Flag {label} {verb} {n}");
             set_status(model, receipt_status(done, &receipt, ids.len()));
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -1129,7 +1150,7 @@ fn do_delete(model: &mut Model) {
             };
             set_status(model, receipt_status(done, &receipt, ids.len()));
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -1171,7 +1192,10 @@ fn do_send(model: &mut Model) {
     let mime_bytes = match MmlCompileOptions::default().compile(&content) {
         Ok(bytes) => bytes,
         Err(e) => {
-            set_status(model, format!("Compile error: {e}"));
+            set_status(
+                model,
+                format!("Compile error: {:#}", anyhow::Error::from(e)),
+            );
             return;
         }
     };
@@ -1191,7 +1215,7 @@ fn do_send(model: &mut Model) {
             set_status(model, status);
             cancel_compose(model);
         }
-        Err(e) => set_status(model, format!("Send error: {e}")),
+        Err(e) => set_status(model, format!("Send error: {e:#}")),
     }
 }
 
@@ -1204,7 +1228,7 @@ fn do_preview(model: &mut Model) {
     {
         Ok(mime) => mime,
         Err(e) => {
-            set_status(model, format!("Compile error: {e}"));
+            set_status(model, format!("Compile error: {e:#}"));
             return;
         }
     };
@@ -1228,7 +1252,7 @@ fn do_save_draft(model: &mut Model) {
             );
             cancel_compose(model);
         }
-        Err(e) => set_status(model, format!("Error: {e}")),
+        Err(e) => set_status(model, format!("Error: {e:#}")),
     }
 }
 
@@ -1630,6 +1654,40 @@ mod tests {
         let status = model.status_message.clone().unwrap();
         assert!(status.contains("mailbox.alias.trash"), "{status}");
         assert_eq!(model.envelopes.len(), 1);
+    }
+
+    /// A failure shows its whole chain, the cause naming what went wrong
+    /// and not only the step it broke.
+    #[cfg(all(unix, feature = "pimdir"))]
+    #[test]
+    fn a_failure_shows_its_cause_in_the_status_bar() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("store");
+        let db = root.join("pimdir.db");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&db, "not a database\n".repeat(16)).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&db, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let config = dir.path().join("config.toml");
+        let toml = format!(
+            "[accounts.test]\ndefault = true\nemail = \"t@localhost\"\n\
+             pimdir.root = {:?}\npimdir.account = \"test\"\n",
+            root.display().to_string(),
+        );
+        fs::write(&config, toml).unwrap();
+
+        let client = MailClient::new(vec![config], None, Backend::Auto);
+        let mut model = Model::for_tests(client, 10);
+
+        run(&mut model, Message::Initialize);
+
+        let status = model.status_message.clone().unwrap();
+        assert!(status.starts_with("Error: Open pimdir store"), "{status}");
+        assert!(status.contains("not a database"), "{status}");
+        assert!(model.mailboxes.is_empty());
     }
 
     /// Sending over a scripted SMTP server on the loopback.
